@@ -9,7 +9,6 @@ from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 import qrcode
 from qrcode.image.pil import PilImage
 import io
@@ -22,7 +21,6 @@ import providers.spotify  # register
 # ── App setup ──────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
 app = FastAPI(title="Sync Party")
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 _jinja = Environment(loader=FileSystemLoader(BASE_DIR / "templates"))
 
 
