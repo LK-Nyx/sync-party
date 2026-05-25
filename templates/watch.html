@@ -6,89 +6,31 @@
     <title>Watch — {{ name }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: #0a0a0a;
-            color: #eee;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .topbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 16px;
-            background: #111;
-            border-bottom: 1px solid #222;
-        }
-        .topbar h2 { font-size: 1rem; }
-        .mode-btns {
-            display: flex; gap: 4px;
-        }
-        .mode-btns button {
-            padding: 6px 12px;
-            border: 1px solid #333;
-            border-radius: 6px;
-            background: #1a1a1a;
-            color: #aaa;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #eee; min-height: 100vh; display: flex; flex-direction: column; }
+        .topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #111; border-bottom: 1px solid #222; gap: 8px; }
+        .topbar h2 { font-size: 1rem; white-space: nowrap; }
+        .mode-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+        .mode-btns button { padding: 6px 12px; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; color: #aaa; cursor: pointer; font-size: 0.8rem; }
         .mode-btns button.active { background: #8338ec; color: white; border-color: #8338ec; }
-        
         .content { flex: 1; position: relative; overflow: hidden; }
-        
         .view { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; }
         .view.active { display: flex; }
-        
         #view-video { background: #000; }
         #view-video #player { width: 100%; height: 100%; }
-        
         #view-audio { background: #0a0a0a; align-items: center; justify-content: center; flex-direction: column; }
-        .audio-viz {
-            width: 200px; height: 200px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #ff006e, #8338ec);
-            animation: pulse 2s ease-in-out infinite;
-            margin-bottom: 20px;
-        }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); opacity: 0.8; }
-            50% { transform: scale(1.1); opacity: 1; }
-        }
+        .audio-viz { width: 200px; height: 200px; border-radius: 50%; background: linear-gradient(135deg, #ff006e, #8338ec); animation: pulse 2s ease-in-out infinite; margin-bottom: 20px; }
+        @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } }
         .audio-title { font-size: 1.2rem; text-align: center; max-width: 300px; }
-        
         #view-resume { background: #0f0f0f; flex-direction: column; padding: 20px; overflow-y: auto; }
         .resume-section { margin-bottom: 20px; padding: 16px; background: #1a1a1a; border-radius: 8px; border: 1px solid #222; }
         .resume-section h3 { font-size: 0.9rem; color: #888; margin-bottom: 8px; text-transform: uppercase; }
-        
+        .resume-now p { font-size: 1.1rem; word-break: break-word; }
         #view-karaoke { background: #000; }
         #view-karaoke iframe { width: 100%; height: 100%; border: none; }
-
-        .qr-overlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.92);
-            display: none;
-            align-items: center; justify-content: center;
-            z-index: 100;
-            flex-direction: column;
-        }
+        .qr-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.92); display: none; align-items: center; justify-content: center; z-index: 100; flex-direction: column; }
         .qr-overlay.active { display: flex; }
         .qr-overlay img { max-width: 280px; border-radius: 12px; margin-bottom: 16px; }
         .qr-overlay .qr-link { font-size: 0.8rem; color: #888; max-width: 280px; word-break: break-all; text-align: center; }
-
-        .join-badge {
-            padding: 4px 10px;
-            background: #4ade80;
-            color: #000;
-            border-radius: 12px;
-            font-size: 0.7rem;
-            font-weight: 700;
-            animation: fadeIn 0.5s;
-        }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -100,21 +42,21 @@
             <button data-mode="audio" onclick="switchMode('audio')">🎵 Audio</button>
             <button data-mode="karaoke" onclick="switchMode('karaoke')">🎤 Karaoké</button>
         </div>
-        <span id="viewer-count" style="font-size:0.8rem;color:#888"></span>
+        <span id="vc" style="font-size:0.8rem;color:#888"></span>
     </div>
 
     <div class="content">
         <div class="view active" id="view-resume">
-            <div class="resume-section">
-                <h3>📋 En cours</h3>
-                <p id="resume-title">En attente de la playlist...</p>
+            <div class="resume-section resume-now">
+                <h3>📋 EN COURS</h3>
+                <p id="resume-title">En attente...</p>
             </div>
             <div class="resume-section">
-                <h3>🔗 Playlist</h3>
+                <h3>🔗 PLAYLIST</h3>
                 <a id="resume-link" href="#" target="_blank" style="color:#8338ec">Ouvrir sur YouTube</a>
             </div>
             <div class="resume-section">
-                <h3>👥 Connectés</h3>
+                <h3>👥 CONNECTÉS</h3>
                 <span id="resume-count">0</span> viewers
             </div>
         </div>
@@ -138,152 +80,167 @@
     <script>
         // Jinja2 variables
         const SLUG = "{{ slug }}";
-        const ROOM_NAME = "{{ name }}";
     </script>
     <script>
     {% raw %}
-        const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/${SLUG}?role=viewer`;
-        
         let ws = null;
         let currentMode = 'resume';
+        let forcedMode = null;
         let player = null;
         let currentVideoId = '';
-        let syncing = false;
-        let forcedMode = null;
+        let syncTargetTime = 0;
+        let viewerCount = 0;
 
-        // ── WebSocket ─────────────────────────────────────────
+        // ── Cold-start: get initial state ────────────────────
+        async function loadInitialState() {
+            try {
+                const resp = await fetch('/api/room/' + SLUG + '/state');
+                const state = await resp.json();
+                viewerCount = state.viewer_count || 0;
+                updateCount();
+                document.getElementById('resume-title').textContent = state.video_title || 'En attente...';
+                if (state.playlist_url) {
+                    document.getElementById('resume-link').href = state.playlist_url;
+                }
+                if (state.global_mode) {
+                    forcedMode = state.global_mode;
+                    switchMode(state.global_mode);
+                }
+            } catch(e) { console.log('Cold-start fetch failed:', e); }
+        }
+
+        // ── WebSocket ────────────────────────────────────────
         function connectWS() {
-            ws = new WebSocket(WS_URL);
-            ws.onopen = () => { ws.send(JSON.stringify({ type: 'set_name', name: 'Guest-' + Math.random().toString(36).slice(2,6) })); };
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(proto + '//' + location.host + '/ws/' + SLUG);
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ role: 'viewer' }));
+            };
             ws.onmessage = (e) => {
                 const msg = JSON.parse(e.data);
                 handle(msg);
             };
-            ws.onclose = () => setTimeout(connectWS, 3000);
+            ws.onclose = () => { setTimeout(connectWS, 3000); };
         }
-        connectWS();
-
         function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
 
         function handle(msg) {
             switch (msg.type) {
                 case 'player_state':
-                    updateResume(msg);
+                    if (msg.video_title) {
+                        document.getElementById('resume-title').textContent = msg.video_title;
+                        document.getElementById('audio-title').textContent = msg.video_title;
+                    }
+                    if (msg.playlist_url) {
+                        document.getElementById('resume-link').href = msg.playlist_url;
+                    }
+                    if (msg.viewer_count !== undefined) {
+                        viewerCount = msg.viewer_count;
+                        updateCount();
+                    }
                     if (currentMode === 'video') syncPlayer(msg);
-                    if (currentMode === 'audio') syncAudio(msg);
                     if (currentMode === 'karaoke') syncKaraoke(msg);
                     break;
+
                 case 'playlist_set':
                     document.getElementById('resume-link').href = msg.url;
                     break;
+
                 case 'mode_changed':
                     if (!forcedMode) switchMode(msg.mode);
                     break;
+
                 case 'mode_forced':
                     forcedMode = msg.mode;
                     switchMode(msg.mode);
                     break;
+
                 case 'show_qr':
-                    showQROverlay(msg.url);
+                    document.getElementById('qr-img').src = '/party/' + SLUG + '/qr';
+                    document.getElementById('qr-link').textContent = msg.url;
+                    document.getElementById('qr-overlay').classList.add('active');
                     break;
+
                 case 'hide_qr':
-                    hideQROverlay();
+                    document.getElementById('qr-overlay').classList.remove('active');
                     break;
+
                 case 'viewer_joined':
-                    updateViewerCount(msg.count);
-                    document.getElementById('viewer-count').insertAdjacentHTML('beforeend', 
-                        `<span class="join-badge">${msg.name}</span>`);
-                    setTimeout(() => {
-                        const badges = document.querySelectorAll('.join-badge');
-                        if (badges.length) badges[badges.length-1].remove();
-                    }, 3000);
+                    viewerCount = msg.count;
+                    updateCount();
                     break;
+
                 case 'viewer_left':
-                    updateViewerCount(msg.count);
+                    viewerCount = msg.count;
+                    updateCount();
                     break;
-                case 'muted':
-                    forcedMode = 'resume';
-                    switchMode('resume');
-                    break;
-                case 'unmuted':
-                    forcedMode = null;
-                    break;
+
+                case 'muted': forcedMode = 'resume'; switchMode('resume'); break;
+                case 'unmuted': forcedMode = null; break;
+
                 case 'kicked':
                     document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#f87171;font-size:1.5rem">🚫 Déconnecté par l\'admin</div>';
                     break;
             }
         }
 
+        function updateCount() {
+            document.getElementById('vc').textContent = viewerCount + ' 👥';
+            document.getElementById('resume-count').textContent = viewerCount;
+        }
+
         // ── Modes ─────────────────────────────────────────────
         function switchMode(mode) {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-            document.querySelector(`#view-${mode}`).classList.add('active');
+            document.querySelector('#view-' + mode).classList.add('active');
             document.querySelectorAll('#mode-btns button').forEach(b => b.classList.remove('active'));
-            const btn = document.querySelector(`#mode-btns button[data-mode="${mode}"]`);
+            const btn = document.querySelector('#mode-btns button[data-mode="' + mode + '"]');
             if (btn) btn.classList.add('active');
             currentMode = mode;
             send({ type: 'set_mode', mode });
         }
 
-        // ── Resume view ───────────────────────────────────────
-        function updateResume(msg) {
-            document.getElementById('resume-title').textContent = msg.title || 'Lecture en cours...';
-        }
-        function updateViewerCount(n) {
-            document.getElementById('viewer-count').textContent = n + ' 👥';
-            document.getElementById('resume-count').textContent = n;
+        // ── Video sync ─────────────────────────────────────────
+        function onYouTubeIframeAPIReady() {
+            // Player initialized lazily when video mode is first activated
         }
 
-        // ── Video mode ────────────────────────────────────────
         function initPlayer() {
             if (player) return;
             player = new YT.Player('player', {
-                height: '100%',
-                width: '100%',
-                playerVars: { autoplay: 0, controls: 1 },
+                height: '100%', width: '100%',
+                playerVars: { autoplay: 1, controls: 1 },
             });
         }
+
         function syncPlayer(msg) {
             if (!player || !player.loadVideoById) { initPlayer(); return; }
-            syncing = true;
             if (msg.video_id && msg.video_id !== currentVideoId) {
                 player.loadVideoById(msg.video_id, msg.current_time || 0);
                 currentVideoId = msg.video_id;
             }
-            if (msg.state === 1) player.playVideo();
-            if (msg.state === 2) player.pauseVideo();
-            if (msg.current_time && player.getCurrentTime && Math.abs((player.getCurrentTime() || 0) - msg.current_time) > 2) {
+            if (msg.state === 1 && player.playVideo) player.playVideo();
+            if (msg.state === 2 && player.pauseVideo) player.pauseVideo();
+            if (msg.current_time && player.seekTo && Math.abs((player.getCurrentTime?.() || 0) - msg.current_time) > 2) {
                 player.seekTo(msg.current_time, true);
             }
-            syncing = false;
         }
 
-        // ── Audio mode ────────────────────────────────────────
-        function syncAudio(msg) {
-            document.getElementById('audio-title').textContent = msg.title || 'Lecture en cours...';
-        }
-
-        // ── Karaoke mode ──────────────────────────────────────
+        // ── Karaoke sync ───────────────────────────────────────
         function syncKaraoke(msg) {
-            const title = msg.title || '';
+            const title = msg.video_title || '';
             if (title) {
                 const q = encodeURIComponent(title + ' karaoke');
-                const frame = document.getElementById('karaoke-frame');
-                frame.src = `https://www.youtube.com/embed?listType=search&list=${q}&autoplay=1`;
+                document.getElementById('karaoke-frame').src =
+                    'https://www.youtube.com/embed?listType=search&list=' + q + '&autoplay=1';
             }
         }
 
-        // ── QR Overlay ────────────────────────────────────────
-        function showQROverlay(url) {
-            document.getElementById('qr-img').src = `/party/${SLUG}/qr`;
-            document.getElementById('qr-link').textContent = url;
-            document.getElementById('qr-overlay').classList.add('active');
-        }
-        function hideQROverlay() {
-            document.getElementById('qr-overlay').classList.remove('active');
-        }
-    </script>
+        // ── Init ───────────────────────────────────────────────
+        loadInitialState();
+        connectWS();
     {% endraw %}
+    </script>
     <script src="https://www.youtube.com/iframe_api" async></script>
 </body>
 </html>

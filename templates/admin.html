@@ -6,98 +6,42 @@
     <title>Admin — {{ name }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: #0a0a0a;
-            color: #eee;
-            display: flex;
-            min-height: 100vh;
-        }
-        .sidebar {
-            width: 340px;
-            background: #111;
-            border-right: 1px solid #222;
-            padding: 20px;
-            display: flex; flex-direction: column;
-            overflow-y: auto;
-        }
-        .main {
-            flex: 1;
-            display: flex; flex-direction: column;
-        }
-        .player-wrap {
-            flex: 1;
-            background: #000;
-            position: relative;
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #eee; display: flex; min-height: 100vh; }
+        .sidebar { width: 360px; background: #111; border-right: 1px solid #222; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; }
+        .main { flex: 1; display: flex; flex-direction: column; }
+        .player-wrap { flex: 1; background: #000; position: relative; min-height: 400px; }
         #player { width: 100%; height: 100%; }
-        .qr-overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.9);
-            display: none;
-            align-items: center; justify-content: center;
-            z-index: 10;
-        }
+        .qr-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 10; }
         .qr-overlay.active { display: flex; }
         .qr-overlay img { max-width: 300px; border-radius: 12px; }
-
         h2 { font-size: 1.1rem; margin-bottom: 16px; }
-        .section { margin-bottom: 20px; }
+        .section { margin-bottom: 18px; }
         .section label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px; }
-        .section input, .section select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #333;
-            border-radius: 6px;
-            background: #1a1a1a;
-            color: #eee;
-            font-size: 0.9rem;
-        }
-        .btn {
-            width: 100%;
-            padding: 10px;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            cursor: pointer;
-            margin-bottom: 6px;
-            font-weight: 600;
-        }
+        .section input, .section select { width: 100%; padding: 10px; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; color: #eee; font-size: 0.9rem; }
+        .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 0.9rem; cursor: pointer; margin-bottom: 6px; font-weight: 600; }
         .btn-purple { background: #8338ec; color: white; }
         .btn-pink { background: #ff006e; color: white; }
         .btn-dark { background: #222; color: #ccc; border: 1px solid #333; }
         .btn-small { padding: 6px 10px; font-size: 0.75rem; width: auto; }
-
-        .viewer-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 10px;
-            background: #1a1a1a;
-            border-radius: 6px;
-            margin-bottom: 6px;
-            font-size: 0.85rem;
-        }
-        .viewer-name { flex: 1; }
-        .viewer-badges { display: flex; gap: 4px; margin: 0 8px; }
-        .badge {
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-size: 0.65rem;
-            font-weight: 600;
-        }
-        .badge-dj { background: #ff006e; color: white; }
-        .badge-muted { background: #444; color: #999; }
-        .badge-mode { background: #222; color: #aaa; }
-        .viewer-actions { display: flex; gap: 4px; }
-
+        .player-ctrls { display: flex; gap: 4px; }
+        .player-ctrls button { flex: 1; }
         .mode-btns { display: flex; gap: 4px; }
         .mode-btns button { flex: 1; padding: 8px; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; color: #aaa; cursor: pointer; font-size: 0.75rem; }
         .mode-btns button.active { background: #8338ec; color: white; border-color: #8338ec; }
-
-        .status { color: #4ade80; font-size: 0.8rem; margin-top: 8px; }
-        .status.error { color: #f87171; }
+        .viewer-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: #1a1a1a; border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem; }
+        .viewer-name { flex: 1; }
+        .viewer-badges { display: flex; gap: 4px; margin: 0 8px; }
+        .badge { padding: 2px 6px; border-radius: 10px; font-size: 0.65rem; font-weight: 600; }
+        .badge-dj { background: #ff006e; color: white; }
+        .badge-muted { background: #444; color: #999; }
+        .badge-mode { background: #222; color: #aaa; }
+        .badge-mod { background: #8338ec; color: white; }
+        .viewer-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+        .status { color: #4ade80; font-size: 0.8rem; margin-top: auto; }
+        .status.disconnected { color: #f87171; }
+        .source-btns { display: flex; gap: 4px; }
+        .source-btns button { flex: 1; padding: 8px; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; color: #aaa; cursor: pointer; font-size: 0.75rem; }
+        .source-btns button.active { background: #ff006e; color: white; border-color: #ff006e; }
     </style>
 </head>
 <body>
@@ -105,24 +49,32 @@
         <h2>🎛️ Admin — {{ name }}</h2>
 
         <div class="section">
+            <label>Source</label>
+            <div class="source-btns" id="source-btns">
+                <button data-prov="youtube" class="active" onclick="setProvider('youtube')">🎬 YouTube</button>
+                <button data-prov="spotify" onclick="setProvider('spotify')">🎵 Spotify</button>
+            </div>
+        </div>
+
+        <div class="section">
             <label>Playlist YouTube</label>
-            <input type="text" id="playlist-url" value="{{ playlist_url }}" placeholder="URL ou ID de playlist">
+            <input type="text" id="playlist-url" value="{{ playlist_url }}" placeholder="URL ou ID playlist">
             <button class="btn btn-purple" style="margin-top:6px" onclick="setPlaylist()">Charger</button>
         </div>
 
         <div class="section">
             <label>Contrôles</label>
-            <div style="display:flex;gap:4px">
-                <button class="btn btn-dark" onclick="playerControl('pause')">⏸</button>
-                <button class="btn btn-dark" onclick="playerControl('play')">▶</button>
-                <button class="btn btn-dark" onclick="playerControl('next')">⏭</button>
-                <button class="btn btn-dark" onclick="playerControl('prev')">⏮</button>
+            <div class="player-ctrls">
+                <button class="btn btn-dark" onclick="playerCmd('pause')">⏸</button>
+                <button class="btn btn-dark" onclick="playerCmd('play')">▶</button>
+                <button class="btn btn-dark" onclick="playerCmd('next')">⏭</button>
+                <button class="btn btn-dark" onclick="playerCmd('prev')">⏮</button>
             </div>
         </div>
 
         <div class="section">
             <label>Mode global</label>
-            <div class="mode-btns" id="global-mode-btns">
+            <div class="mode-btns" id="mode-btns">
                 <button data-mode="resume" class="active" onclick="setGlobalMode('resume')">📋</button>
                 <button data-mode="video" onclick="setGlobalMode('video')">🎬</button>
                 <button data-mode="audio" onclick="setGlobalMode('audio')">🎵</button>
@@ -131,16 +83,16 @@
         </div>
 
         <div class="section">
-            <button class="btn btn-purple" onclick="showQR()">📱 Afficher QR Code</button>
-            <button class="btn btn-dark" onclick="hideQR()" style="margin-top:4px">❌ Cacher QR</button>
+            <button class="btn btn-purple" onclick="showQR()">📱 Afficher QR</button>
+            <button class="btn btn-dark" onclick="hideQR()">❌ Cacher QR</button>
         </div>
 
         <div class="section">
-            <label>Viewers (<span id="viewer-count">0</span>)</label>
+            <label>Viewers (<span id="vc">0</span>)</label>
             <div id="viewer-list"></div>
         </div>
 
-        <div class="status" id="status">🟢 Connecté</div>
+        <div class="status" id="status">🔴 Déconnecté</div>
     </div>
 
     <div class="main">
@@ -156,80 +108,74 @@
     <script>
         // Jinja2 variables
         const SLUG = "{{ slug }}";
-        const ROOM_NAME = "{{ name }}";
-        const PLAYLIST_URL = "{{ playlist_url }}";
-        const GLOBAL_MODE = "{{ global_mode }}";
+        const AUTH_TOKEN = "{{ auth_token }}";
     </script>
     <script>
     {% raw %}
-
-        const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/${SLUG}?role=admin&pwd=${encodeURIComponent(new URLSearchParams(location.search).get('pwd') || '')}`;
-
         let player = null;
         let ws = null;
         let currentVideoId = '';
-        let syncing = false;
+        let playerReady = false;
+        let lastBroadcastTime = 0;
 
-        // ── YouTube Player ────────────────────────────────────
+        // ── YouTube API ──────────────────────────────────────
         function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
-                height: '100%',
-                width: '100%',
+                height: '100%', width: '100%',
                 playerVars: { autoplay: 0, controls: 1 },
                 events: {
-                    onReady: () => { connectWS(); },
-                    onStateChange: onPlayerStateChange,
+                    onReady: () => { playerReady = true; connectWS(); },
+                    onStateChange: onStateChange,
                 }
             });
         }
 
-        function onPlayerStateChange(event) {
-            if (syncing) return;
-            const state = event.data;
-            const time = player.getCurrentTime();
-            const vid = player.getVideoData()?.video_id || currentVideoId;
+        function onStateChange(event) {
+            if (!player || !playerReady) return;
+            // throttle broadcasts
+            const now = Date.now();
+            if (now - lastBroadcastTime < 500) return;
+            lastBroadcastTime = now;
 
-            send({ type: 'player_update', video_id: vid, state, current_time: time });
+            const vid = player.getVideoData()?.video_id || '';
+            const title = player.getVideoData()?.title || '';
+            const time = player.getCurrentTime();
+
+            send({ type: 'player_update', video_id: vid, title: title, state: event.data, current_time: time });
         }
 
-        // ── WebSocket ─────────────────────────────────────────
+        // ── WebSocket ────────────────────────────────────────
         function connectWS() {
-            ws = new WebSocket(WS_URL);
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(proto + '//' + location.host + '/ws/' + SLUG);
             ws.onopen = () => {
-                document.getElementById('status').textContent = '🟢 Connecté';
+                setStatus('🟢 Connecté');
+                // Auth as first message
+                ws.send(JSON.stringify({ role: 'admin', token: AUTH_TOKEN }));
             };
             ws.onmessage = (e) => {
                 const msg = JSON.parse(e.data);
+                if (msg.type === 'auth_ok') renderViewers(msg.viewers);
                 if (msg.type === 'viewer_list') renderViewers(msg.viewers);
-                if (msg.type === 'player_update') syncPlayer(msg);
-                if (msg.type === 'dj_request') handleDJ(msg);
+                if (msg.type === 'dj_request') onDJRequest(msg);
+                if (msg.type === 'viewer_count') updateCount(msg.count);
             };
             ws.onclose = () => {
-                document.getElementById('status').innerHTML = '<span class="error">🔴 Déconnecté — reconnection...</span>';
+                setStatus('🔴 Déconnecté — reconnexion...');
                 setTimeout(connectWS, 3000);
             };
         }
 
-        function send(obj) {
-            if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+        function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+
+        function setStatus(txt) {
+            const el = document.getElementById('status');
+            el.textContent = txt;
+            el.className = 'status' + (txt.includes('🔴') ? ' disconnected' : '');
         }
 
-        // ── Playlist ──────────────────────────────────────────
-        function setPlaylist() {
-            const url = document.getElementById('playlist-url').value.trim();
-            if (!url) return;
-
-            // Extract playlist ID from URL
-            const match = url.match(/[&?]list=([^&]+)/);
-            const playlistId = match ? match[1] : url;
-
-            player.loadPlaylist({ list: playlistId, listType: 'playlist' });
-            currentVideoId = '';
-            send({ type: 'set_playlist', url: url, video_id: '' });
-        }
-
-        // ── Controls ──────────────────────────────────────────
-        function playerControl(cmd) {
+        // ── Controls ─────────────────────────────────────────
+        function playerCmd(cmd) {
             if (!player) return;
             if (cmd === 'play') player.playVideo();
             if (cmd === 'pause') player.pauseVideo();
@@ -237,26 +183,37 @@
             if (cmd === 'prev') player.previousVideo();
         }
 
+        function setPlaylist() {
+            const url = document.getElementById('playlist-url').value.trim();
+            if (!url) return;
+            const m = url.match(/[&?]list=([a-zA-Z0-9_-]+)/);
+            const playlistId = m ? m[1] : url;
+            if (player) {
+                player.loadPlaylist({ list: playlistId, listType: 'playlist' });
+                currentVideoId = '';
+            }
+            send({ type: 'set_playlist', url: url, video_id: '' });
+        }
+
         function setGlobalMode(mode) {
-            document.querySelectorAll('#global-mode-btns button').forEach(b => b.classList.remove('active'));
-            document.querySelector(`#global-mode-btns button[data-mode="${mode}"]`).classList.add('active');
+            document.querySelectorAll('#mode-btns button').forEach(b => b.classList.remove('active'));
+            document.querySelector('#mode-btns button[data-mode="' + mode + '"]').classList.add('active');
             send({ type: 'set_mode', mode });
         }
 
-        function forceMode(target, mode) {
-            send({ type: 'force_mode', target, mode });
+        function setProvider(prov) {
+            document.querySelectorAll('#source-btns button').forEach(b => b.classList.remove('active'));
+            document.querySelector('#source-btns button[data-prov="' + prov + '"]').classList.add('active');
+            send({ type: 'set_provider', provider: prov });
         }
 
-        function muteViewer(name) { send({ type: 'mute_viewer', target: name }); }
-        function unmuteViewer(name) { send({ type: 'unmute_viewer', target: name }); }
-        function kickViewer(name) { send({ type: 'kick_viewer', target: name }); }
-        function promoteDJ(name) { send({ type: 'promote_dj', target: name }); }
+        function muteViewer(n) { send({ type: 'mute_viewer', target: n }); }
+        function unmuteViewer(n) { send({ type: 'unmute_viewer', target: n }); }
+        function kickViewer(n) { send({ type: 'kick_viewer', target: n }); }
+        function promoteDJ(n) { send({ type: 'promote_dj', target: n }); }
 
-        // ── QR Code ───────────────────────────────────────────
-        async function showQR() {
-            const resp = await fetch(`/party/${SLUG}/qr`);
-            const html = await resp.text();
-            document.getElementById('qr-overlay').innerHTML = html;
+        function showQR() {
+            document.getElementById('qr-img').src = '/party/' + SLUG + '/qr';
             document.getElementById('qr-overlay').classList.add('active');
             send({ type: 'show_qr' });
         }
@@ -265,53 +222,39 @@
             send({ type: 'hide_qr' });
         }
 
-        // ── Sync ──────────────────────────────────────────────
-        function syncPlayer(msg) {
-            if (!player) return;
-            syncing = true;
-            if (msg.video_id && msg.video_id !== currentVideoId) {
-                // Don't load new video if already playing correct playlist
-                // player.loadVideoById(msg.video_id);
-                currentVideoId = msg.video_id;
-            }
-            if (msg.state === 1) player.playVideo();
-            if (msg.state === 2) player.pauseVideo();
-            if (msg.current_time && Math.abs(player.getCurrentTime() - msg.current_time) > 2) {
-                player.seekTo(msg.current_time, true);
-            }
-            syncing = false;
-        }
-
-        function handleDJ(msg) {
+        function onDJRequest(msg) {
             if (msg.command === 'next') player.nextVideo();
             if (msg.command === 'prev') player.previousVideo();
         }
 
-        // ── Viewer List ───────────────────────────────────────
+        // ── Viewer list ──────────────────────────────────────
         function renderViewers(viewers) {
-            document.getElementById('viewer-count').textContent = viewers.length;
-            const container = document.getElementById('viewer-list');
-            container.innerHTML = viewers.map(v => `
+            updateCount(viewers.length);
+            const c = document.getElementById('viewer-list');
+            c.innerHTML = viewers.map(v => `
                 <div class="viewer-item">
                     <span class="viewer-name">${v.name}</span>
                     <span class="viewer-badges">
+                        ${v.role === 'moderator' ? '<span class="badge badge-mod">MOD</span>' : ''}
                         ${v.is_dj ? '<span class="badge badge-dj">DJ</span>' : ''}
                         ${v.muted ? '<span class="badge badge-muted">MUTE</span>' : ''}
                         <span class="badge badge-mode">${v.mode}</span>
                     </span>
                     <span class="viewer-actions">
                         ${v.muted
-                            ? `<button class="btn btn-small btn-dark" onclick="unmuteViewer('${v.name}')">🔊</button>`
-                            : `<button class="btn btn-small btn-dark" onclick="muteViewer('${v.name}')">🔇</button>`}
-                        <button class="btn btn-small btn-dark" onclick="kickViewer('${v.name}')">✕</button>
+                            ? '<button class="btn btn-small btn-dark" onclick="unmuteViewer(\'' + v.name + '\')">🔊</button>'
+                            : '<button class="btn btn-small btn-dark" onclick="muteViewer(\'' + v.name + '\')">🔇</button>'}
+                        <button class="btn btn-small btn-dark" onclick="kickViewer(\'' + v.name + '\')">✕</button>
                         ${!v.is_dj
-                            ? `<button class="btn btn-small btn-pink" onclick="promoteDJ('${v.name}')">⭐</button>`
-                            : `<button class="btn btn-small btn-dark" onclick="promoteDJ('')" title="Retirer DJ">👑</button>`}
+                            ? '<button class="btn btn-small btn-pink" onclick="promoteDJ(\'' + v.name + '\')">⭐</button>'
+                            : '<button class="btn btn-small btn-dark" onclick="promoteDJ(\'\')" title="Retirer DJ">👑</button>'}
                     </span>
                 </div>
             `).join('');
         }
-    </script>
+
+        function updateCount(n) { document.getElementById('vc').textContent = n; }
     {% endraw %}
+    </script>
 </body>
 </html>
