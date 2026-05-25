@@ -2,5 +2,6 @@ fastapi
 uvicorn
 jinja2
 python-multipart
-qrcode[pil]
+qrcode
+pillow
 websockets
