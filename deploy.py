@@ -31,16 +31,23 @@ URL = os.environ.get("SYNC_PARTY_URL", "https://sync-party.onrender.com")
 
 def trigger_deploy():
     print(f"🚀 Triggering deploy for {SERVICE_ID}...")
+    body = json.dumps({"clearCache": "clear"}).encode()
     req = urllib.request.Request(
         f"https://api.render.com/v1/services/{SERVICE_ID}/deploys",
         method="POST",
-        data=json.dumps({"clearCache": "clear"}).encode(),
+        data=body,
         headers={
             "Authorization": f"Bearer {RENDER_TOKEN}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
         },
     )
-    resp = urllib.request.urlopen(req, context=SSL_CTX, timeout=30)
+    try:
+        resp = urllib.request.urlopen(req, context=SSL_CTX, timeout=30)
+    except urllib.error.HTTPError as e:
+        print(f"❌ HTTP {e.code}: {e.read().decode()[:300]}")
+        return False
+
     data = json.loads(resp.read())
     deploy_id = data.get("id", "??")
     status = data.get("status", "??")

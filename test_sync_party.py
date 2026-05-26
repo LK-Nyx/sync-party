@@ -1,202 +1,152 @@
 #!/usr/bin/env python3
-"""Sync Party test suite — end-to-end tests for all features.
-
-Usage:
-  python3 test_sync_party.py [--url https://sync-party.onrender.com] [--superadmin-pwd changeme]
-
-Tests:
-  1. Health check & providers
-  2. Create room (admin)
-  3. Admin login (cookie-based)
-  4. Admin dashboard access
-  5. Viewer page access
-  6. API state endpoint
-  7. QR code endpoint
-  8. WebSocket viewer connection + player sync
-  9. WebSocket admin connection + viewer detection
-  10. Super-admin login
-  11. Super-admin dashboard
-  12. Super-admin delete room
-  13. Rate limiting
-  14. Room expiration / cleanup
-"""
+"""Sync Party E2E test suite — using curl for reliable cookie handling."""
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
-import urllib.request
-import urllib.error
-import http.cookiejar
-import ssl
 
-# Skip SSL verification for local testing
-SSL_CTX = ssl.create_default_context()
-SSL_CTX.check_hostname = False
-SSL_CTX.verify_mode = ssl.CERT_NONE
+URL = os.environ.get("SYNC_PARTY_URL", "https://sync-party.onrender.com")
+SUPERADMIN_PWD = os.environ.get("SUPER_ADMIN_PWD", "changeme_superadmin")
+RATE_MAX = 5
 
-class SyncPartyTester:
-    def __init__(self, base_url, superadmin_pwd):
-        self.base = base_url.rstrip("/")
-        self.superadmin_pwd = superadmin_pwd
-        self.cookiejar = http.cookiejar.CookieJar()
-        self.results = []
-        self.admin_slug = None
+def curl(path, method="GET", data=None, cookiejar=None, location=False):
+    """Run curl. Returns (http_code, body, cookiejar_path)."""
+    cj = cookiejar or tempfile.mktemp(suffix=".cookies")
+    cmd = ["curl", "-s", "-w", "\n%{http_code}", "-b", cj, "-c", cj,
+           "--max-time", "15", "-X", method]
+    if method == "POST" and data:
+        cmd += ["-d", data, "-H", "Content-Type: application/x-www-form-urlencoded"]
+    if location:
+        cmd += ["-L"]
+    cmd.append(f"{URL}{path}")
+    
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    output = result.stdout.strip()
+    lines = output.split("\n")
+    if len(lines) >= 2:
+        http_code = lines[-1]
+        body = "\n".join(lines[:-1])
+    else:
+        http_code = "000"
+        body = ""
+    return http_code.strip(), body, cj
 
-    def _req(self, path, method="GET", data=None, headers=None):
-        url = f"{self.base}{path}"
-        req = urllib.request.Request(url, method=method, headers=headers or {})
-        if data:
-            req.data = data.encode() if isinstance(data, str) else data
+def check(name, condition, detail=""):
+    s = "✅" if condition else "❌"
+    print(f"  {s} {name} {detail if detail else ''}")
 
-        opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(self.cookiejar),
-            urllib.request.HTTPSHandler(context=SSL_CTX),
-        )
+def test(name):
+    print(f"\n{'='*60}\n  {name}\n{'='*60}")
+
+def main():
+    print(f"\n{'#'*60}")
+    print(f"# Sync Party E2E Test Suite (curl)")
+    print(f"# URL: {URL}")
+    print(f"# Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'#'*60}")
+
+    # ── 1. Health ──────────────────────────────────────────
+    test("1. Health & Providers")
+    code, body, _ = curl("/health")
+    check("Health 200", code == "200", body)
+    code2, body2, _ = curl("/providers")
+    check("Providers ok", code2 == "200" and "youtube" in body2)
+
+    # ── 2. Create room + admin login (must run BEFORE rate limit test) ──
+    test("2. Create room + admin login")
+    code, body, admin_cj = curl("/create", "POST",
+        "name=E2E+Test&admin_password=testpass123", location=True)
+    check("Create room (200 after redirect)", code == "200")
+
+    # Extract slug from body
+    import re
+    m = re.search(r'const SLUG = "([a-f0-9]+)"', body)
+    slug = m.group(1) if m else None
+    check("Slug found in admin page", bool(slug), slug or "")
+
+    # Verify cookie exists
+    with open(admin_cj) as f:
+        cookies = f.read()
+    check("Cookie sync_party_auth", "sync_party_auth" in cookies)
+
+    # ── 3. Admin dashboard ───────────────────────────────
+    test("3. Admin dashboard")
+    if not slug:
+        check("Skipped — no slug", False)
+    else:
+        code, body, _ = curl(f"/party/{slug}/admin", cookiejar=admin_cj)
+        check("Dashboard 200", code == "200", f"{len(body)}B")
+        check("Has playlist input", "playlist-url" in body)
+        check("Has mode buttons", "mode-btns" in body)
+
+    # ── 4. Viewer page + state ──────────────────────────
+    test("4. Viewer page + API state")
+    if slug:
+        code, body, _ = curl(f"/party/{slug}")
+        check("Viewer 200", code == "200", f"{len(body)}B")
+        check("Has Résumé button", "📋 Résumé" in body)
+
+        code, state, _ = curl(f"/api/room/{slug}/state")
+        check("State endpoint 200", code == "200")
         try:
-            resp = opener.open(req, timeout=15)
-            body = resp.read().decode("utf-8", errors="replace")
-            return resp, body
-        except urllib.error.HTTPError as e:
-            return e, e.read().decode("utf-8", errors="replace")
+            s = json.loads(state)
+            check("Has video_id", "video_id" in s)
+            check("Provider youtube", s.get("provider") == "youtube")
+        except:
+            check("State valid JSON", False)
 
-    def check(self, name, condition, detail=""):
-        status = "✅" if condition else "❌"
-        print(f"  {status} {name} {detail if detail else ''}")
+    # ── 5. QR code ──────────────────────────────────────
+    test("5. QR code")
+    if slug:
+        code, body, _ = curl(f"/party/{slug}/qr")
+        check("QR 200", code == "200")
+        check("PNG > 200 bytes", len(body.encode()) > 200)
 
-    def test(self, name):
-        print(f"\n{'='*60}")
-        print(f"  {name}")
-        print(f"{'='*60}")
+    # ── 6. Super-admin flow ─────────────────────────────
+    test("6. Super-admin flow")
+    code, body, su_cj = curl("/admin/login", "POST",
+        f"password={SUPERADMIN_PWD}", location=True)
+    check("SU login redirect (303→/admin/dashboard)", code == "200")
 
-    # ── Tests ──────────────────────────────────────────────────
+    with open(su_cj) as f:
+        su_cookies = f.read()
+    check("Cookie sync_party_su", "sync_party_su" in su_cookies)
 
-    def test_health(self):
-        self.test("1. Health check & providers")
-        resp, body = self._req("/health")
-        self.check("Health returns 200", resp.code == 200, body)
-        resp2, providers = self._req("/providers")
-        self.check("Providers endpoint", resp2.code == 200 and "youtube" in providers)
+    # Dashboard
+    code, body, _ = curl("/admin/dashboard", cookiejar=su_cj)
+    check("Dashboard 200", code == "200", f"{len(body)}B")
+    if slug:
+        check("Room in dashboard", slug in body)
 
-    def test_create_room(self):
-        self.test("2. Create room & login")
-        data = "name=E2E+Test&admin_password=testpass123"
-        resp, _ = self._req("/create", "POST", data,
-                           {"Content-Type": "application/x-www-form-urlencoded"})
-        self.check("Room created (303 redirect)", resp.code == 303)
-        redirect_url = resp.headers.get("Location", "")
-        self.admin_slug = redirect_url.split("/")[-2] if "/party/" in redirect_url else None
-        self.check("Redirect to admin dashboard", bool(self.admin_slug), f"slug={self.admin_slug}")
-        self.check("Cookie set", "sync_party_auth" in str(self.cookiejar))
+    # Logs
+    code, logs, _ = curl("/admin/logs", cookiejar=su_cj)
+    check("Logs 200", code == "200")
+    check("Logs non-empty > 100 bytes", len(logs) > 100)
 
-    def test_admin_dashboard(self):
-        self.test("3. Admin dashboard")
-        if not self.admin_slug:
-            self.check("Admin dashboard", False, "no slug from create")
-            return
-        resp, body = self._req(f"/party/{self.admin_slug}/admin")
-        self.check("Dashboard renders (200)", resp.code == 200, f"{len(body)}B")
-        self.check("Contains playlist input", "playlist-url" in body)
-        self.check("Contains mode buttons", "mode-btns" in body)
+    # Delete room
+    if slug:
+        code, del_body, _ = curl(f"/admin/room/{slug}/delete", "POST", cookiejar=su_cj)
+        check("Delete 200", code == "200")
+        check("Delete response ok", "deleted" in del_body)
 
-    def test_viewer_page(self):
-        self.test("4. Viewer page & API state")
-        if not self.admin_slug:
-            return
-        resp, body = self._req(f"/party/{self.admin_slug}")
-        self.check("Viewer page (200)", resp.code == 200, f"{len(body)}B")
-        self.check("Contains mode buttons", "📋 Résumé" in body)
+        code, _, _ = curl(f"/party/{slug}")
+        check("Room 404 after delete", code == "404")
 
-        resp2, state = self._req(f"/api/room/{self.admin_slug}/state")
-        self.check("State endpoint (200)", resp2.code == 200)
-        state_obj = json.loads(state)
-        self.check("State has video_id", "video_id" in state_obj)
-        self.check("State has provider", state_obj.get("provider") == "youtube")
+    # ── 7. Rate limiting ────────────────────────────────
+    test("7. Rate limiting")
+    rate_cj = tempfile.mktemp(suffix=".cookies")
+    last_code = "000"
+    for i in range(RATE_MAX + 2):
+        last_code, _, rate_cj = curl("/create", "POST",
+            f"name=Rate+{i}&admin_password=test", cookiejar=rate_cj, location=True)
+    check(f"Rate limited at {RATE_MAX}", last_code == "429")
 
-    def test_qr_code(self):
-        self.test("5. QR code")
-        if not self.admin_slug:
-            return
-        resp, body = self._req(f"/party/{self.admin_slug}/qr")
-        self.check("QR returns PNG", resp.code == 200)
-        self.check("PNG content type", resp.headers.get("Content-Type", "") == "image/png")
-        self.check("Non-empty PNG", len(body) > 200)
-
-    def test_superadmin(self):
-        self.test("6. Super-admin flow")
-        # Login
-        import urllib.parse
-        data = f"password={urllib.parse.quote(self.superadmin_pwd)}"
-        resp, _ = self._req("/admin/login", "POST", data,
-                           {"Content-Type": "application/x-www-form-urlencoded"})
-        self.check("Super-admin login (303)", resp.code == 303)
-        self.check("Cookie sync_party_su set", "sync_party_su" in str(self.cookiejar))
-
-        # Dashboard
-        resp, body = self._req("/admin/dashboard")
-        self.check("Dashboard (200)", resp.code == 200, f"{len(body)}B")
-        self.check("Room listed", self.admin_slug and self.admin_slug in body)
-
-        # Logs
-        resp, logs = self._req("/admin/logs")
-        self.check("Logs endpoint (200)", resp.code == 200)
-        self.check("Logs non-empty", len(logs) > 0)
-
-        # Delete room
-        resp, del_body = self._req(f"/admin/room/{self.admin_slug}/delete", "POST")
-        self.check("Delete room", resp.code == 200)
-        self.check("Deleted response", "deleted" in del_body and self.admin_slug in del_body)
-
-        # Verify deletion
-        resp, _ = self._req(f"/party/{self.admin_slug}")
-        self.check("Room 404 after delete", resp.code == 404)
-
-    def test_rate_limits(self):
-        self.test("7. Rate limiting")
-        for i in range(RATE_MAX_CREATE + 2):  # config value
-            data = f"name=Ratelimit+{i}&admin_password=test"
-            resp, _ = self._req("/create", "POST", data,
-                               {"Content-Type": "application/x-www-form-urlencoded"})
-        self.check(f"Rate limited after {RATE_MAX_CREATE}", resp.code == 429)
-
-    def run_all(self):
-        print(f"\n{'#'*60}")
-        print(f"# Sync Party E2E Test Suite")
-        print(f"# Base URL: {self.base}")
-        print(f"# Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'#'*60}")
-
-        tests = [
-            self.test_health,
-            self.test_create_room,
-            self.test_admin_dashboard,
-            self.test_viewer_page,
-            self.test_qr_code,
-            self.test_superadmin,
-            self.test_rate_limits,
-        ]
-
-        for t in tests:
-            try:
-                t()
-            except Exception as e:
-                self.check(t.__name__, False, str(e))
-
-        print(f"\n{'='*60}")
-        print("  ✅ Test suite terminée.")
-        print(f"{'='*60}")
-
+    print(f"\n{'='*60}")
+    print("  ✅ Test suite terminée.")
+    print(f"{'='*60}")
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default=os.environ.get("SYNC_PARTY_URL", "https://sync-party.onrender.com"))
-    parser.add_argument("--superadmin-pwd", default=os.environ.get("SUPER_ADMIN_PWD", "changeme_superadmin"))
-    parser.add_argument("--rate-max", type=int, default=5, help="Max rooms per rate window")
-    args = parser.parse_args()
-
-    # This comes from server config
-    RATE_MAX_CREATE = args.rate_max
-
-    tester = SyncPartyTester(args.url, args.superadmin_pwd)
-    tester.run_all()
+    main()

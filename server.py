@@ -65,17 +65,36 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         rid = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
         request.state.rid = rid
         start = time.monotonic()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            try:
+                logger.warning(
+                    f"req method={request.method} path={request.url.path} status=500 ms={elapsed_ms} err={e}",
+                    extra={
+                        "rid": rid, "ip": request.client.host if request.client else "-",
+                        "method": request.method, "path": request.url.path,
+                        "status": 500, "ms": elapsed_ms,
+                        "slug": request.path_params.get("slug", "-"),
+                    },
+                )
+            except Exception:
+                pass
+            raise
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        logger.info(
-            f"req method={request.method} path={request.url.path} status={response.status_code} ms={elapsed_ms}",
-            extra={
-                "rid": rid, "ip": request.client.host if request.client else "-",
-                "method": request.method, "path": request.url.path,
-                "status": response.status_code, "ms": elapsed_ms,
-                "slug": request.path_params.get("slug", "-"),
-            },
-        )
+        try:
+            logger.info(
+                f"req method={request.method} path={request.url.path} status={response.status_code} ms={elapsed_ms}",
+                extra={
+                    "rid": rid, "ip": request.client.host if request.client else "-",
+                    "method": request.method, "path": request.url.path,
+                    "status": response.status_code, "ms": elapsed_ms,
+                    "slug": request.path_params.get("slug", "-"),
+                },
+            )
+        except Exception:
+            pass
         return response
 
 # ── Config ─────────────────────────────────────────────────────
