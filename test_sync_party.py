@@ -28,12 +28,9 @@ def curl(path, method="GET", data=None, cookiejar=None, location=False):
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
     output = result.stdout.strip()
     lines = output.split("\n")
-    if len(lines) >= 2:
-        http_code = lines[-1]
-        body = "\n".join(lines[:-1])
-    else:
-        http_code = "000"
-        body = ""
+    # -w always appends http_code as last line
+    http_code = lines[-1] if lines else "000"
+    body = "\n".join(lines[:-1]) if len(lines) > 1 else ""
     return http_code.strip(), body, cj
 
 
