@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin — Sync Party</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #eee; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .container { max-width: 400px; width: 90%; padding: 30px; background: #1a1a1a; border-radius: 12px; border: 1px solid #333; text-align: center; }
+        h2 { margin-bottom: 8px; font-size: 1.3rem; color: #ff006e; }
+        .sub { color: #888; font-size: 0.85rem; margin-bottom: 20px; }
+        .error { color: #f87171; font-size: 0.85rem; margin-bottom: 12px; display: none; }
+        input { width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #111; color: #eee; font-size: 1rem; margin-bottom: 16px; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 8px; background: #ff006e; color: white; font-size: 1rem; font-weight: 600; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🔐 Super Admin</h2>
+        <p class="sub">Tableau de bord global — toutes les rooms</p>
+        <div class="error" id="error">Mot de passe incorrect</div>
+        <form id="login-form">
+            <input type="password" name="password" placeholder="Mot de passe super admin" required autofocus>
+            <button type="submit">Entrer</button>
+        </form>
+    </div>
+    <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const pwd = e.target.password.value;
+        const resp = await fetch('/admin/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'password=' + encodeURIComponent(pwd),
+            redirect: 'manual'
+        });
+        if (resp.status === 401) {
+            document.getElementById('error').style.display = 'block';
+        } else if (resp.status === 429) {
+            document.getElementById('error').textContent = 'Trop de tentatives. Attends.';
+            document.getElementById('error').style.display = 'block';
+        } else if (resp.ok) {
+            window.location.href = '/admin/dashboard';
+        }
+    });
+    </script>
+</body>
+</html>

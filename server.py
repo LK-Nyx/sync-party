@@ -2,6 +2,7 @@
 """Sync Party v3 — secure, synced watch party. No passwords in URLs."""
 
 import json
+import os
 import secrets
 import time
 import hmac
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 import qrcode
 import io
 import base64
@@ -22,6 +23,7 @@ import providers.spotify
 # ── Config ─────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
 SERVER_SECRET = secrets.token_hex(32)
+SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PWD", "changeme_superadmin")
 ROOM_TTL = 7200
 MAX_ROOMS = 50
 RATE_WINDOW = 60
@@ -60,6 +62,24 @@ def _verify(token: str, slug: str, role: str = "admin") -> bool:
         return t_slug == slug and (role == "any" or t_role == role)
     except (ValueError, IndexError):
         return False
+
+def _verify_superadmin(token: str) -> bool:
+    """Verify a super-admin token (not tied to a specific room slug)."""
+    try:
+        parts = token.rsplit(":", 1)
+        payload, sig = parts[0], parts[1]
+        expected = hmac.new(SERVER_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
+        if not hmac.compare_digest(sig, expected):
+            return False
+        _, t_role, _ = payload.split(":")
+        return t_role == "superadmin"
+    except (ValueError, IndexError):
+        return False
+
+def _sign_superadmin() -> str:
+    payload = f"global:superadmin:{int(time.time())}"
+    sig = hmac.new(SERVER_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
+    return f"{payload}:{sig}"
 
 def _cookie_auth(request: Request) -> Optional[str]:
     return request.cookies.get("sync_party_auth")
@@ -220,7 +240,7 @@ async def qr_img(slug: str):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    return HTMLResponse(f'<img src="data:image/png;base64,{base64.b64encode(buf.read()).decode()}">')
+    return Response(content=buf.read(), media_type="image/png")
 
 
 @app.get("/api/room/{slug}/state")
@@ -246,6 +266,65 @@ async def health():
     return {"status": "ok", "rooms": len(rooms)}
 
 
+# ── Super-admin dashboard ─────────────────────────────────────
+
+@app.get("/admin", response_class=HTMLResponse)
+async def superadmin_login_page(request: Request):
+    token = _cookie_auth(request)
+    if token and _verify_superadmin(token):
+        return RedirectResponse("/admin/dashboard", status_code=303)
+    return HTMLResponse(render("superadmin_login.html"))
+
+
+@app.post("/admin/login")
+async def superadmin_login(request: Request, password: str = Form(...)):
+    ip = request.client.host if request.client else "unknown"
+    if not _ratelimit(f"superadmin:{ip}", 5):
+        raise HTTPException(429, "Trop de tentatives.")
+    if password != SUPER_ADMIN_PASSWORD:
+        raise HTTPException(401, "Mot de passe incorrect.")
+    token = _sign_superadmin()
+    resp = RedirectResponse("/admin/dashboard", status_code=303)
+    resp.set_cookie("sync_party_su", token, httponly=True, samesite="strict",
+                    max_age=ROOM_TTL, secure=True)
+    return resp
+
+
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+async def superadmin_dashboard(request: Request):
+    token = request.cookies.get("sync_party_su", "")
+    if not token or not _verify_superadmin(token):
+        return RedirectResponse("/admin", status_code=303)
+    _cleanup()
+    room_list = [
+        {
+            "slug": r.slug,
+            "name": r.name,
+            "provider": r.provider,
+            "playlist_url": r.playlist_url or "-",
+            "state": ["⏹", "▶", "⏸"][r.state + 1 if -1 <= r.state <= 2 else 0],
+            "viewers": len(r.viewer_ws),
+            "age": int(time.time() - r.created_at),
+            "admin_online": r.admin_ws is not None,
+        }
+        for r in rooms.values()
+    ]
+    room_list.sort(key=lambda r: r["viewers"], reverse=True)
+    return HTMLResponse(render("superadmin_dashboard.html", rooms=room_list))
+
+
+@app.post("/admin/room/{slug}/delete")
+async def superadmin_delete_room(request: Request, slug: str):
+    token = request.cookies.get("sync_party_su", "")
+    if not token or not _verify_superadmin(token):
+        raise HTTPException(403)
+    room = rooms.pop(slug, None)
+    if not room:
+        raise HTTPException(404, "Room not found")
+    return {"deleted": slug, "name": room.name}
+
+
+# ── Run ────────────────────────────────────────────────────────
 # ── WebSocket ──────────────────────────────────────────────────
 
 @app.websocket("/ws/{slug}")

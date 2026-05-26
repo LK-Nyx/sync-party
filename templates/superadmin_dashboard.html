@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin Dashboard — Sync Party</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #eee; padding: 20px; }
+        h1 { color: #ff006e; margin-bottom: 8px; }
+        .sub { color: #888; margin-bottom: 24px; }
+        table { width: 100%; border-collapse: collapse; background: #1a1a1a; border-radius: 12px; overflow: hidden; border: 1px solid #222; }
+        th { text-align: left; padding: 12px 16px; background: #111; color: #888; font-size: 0.8rem; text-transform: uppercase; }
+        td { padding: 12px 16px; border-top: 1px solid #222; font-size: 0.9rem; }
+        tr:hover { background: #222; }
+        .badge { padding: 3px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+        .badge-on { background: #4ade80; color: #000; }
+        .badge-off { background: #444; color: #999; }
+        .btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 600; }
+        .btn-go { background: #8338ec; color: white; }
+        .btn-del { background: #ff006e; color: white; }
+        .btn-logout { background: #222; color: #888; border: 1px solid #333; position: absolute; top: 20px; right: 20px; }
+        a.btn-go { text-decoration: none; display: inline-block; }
+        .empty { text-align: center; padding: 40px; color: #888; }
+        .refresh { color: #888; font-size: 0.8rem; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <h1>🔐 Super Admin Dashboard</h1>
+    <p class="sub">{{ rooms|length }} rooms actives</p>
+    <a href="/" class="btn btn-go" style="margin-bottom:16px;display:inline-block">🏠 Retour site</a>
+
+    {% if rooms %}
+    <table>
+        <thead>
+            <tr>
+                <th>Room</th>
+                <th>Source</th>
+                <th>État</th>
+                <th>👥</th>
+                <th>Admin</th>
+                <th>Âge</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in rooms %}
+            <tr>
+                <td><strong>{{ r.name }}</strong><br><small style="color:#666">{{ r.slug }}</small></td>
+                <td>{{ r.provider }}</td>
+                <td>{{ r.state }}</td>
+                <td>{{ r.viewers }}</td>
+                <td><span class="badge {{ 'badge-on' if r.admin_online else 'badge-off' }}">{{ 'ON' if r.admin_online else 'OFF' }}</span></td>
+                <td>{{ r.age }}s</td>
+                <td>
+                    <a href="/party/{{ r.slug }}" class="btn btn-go" target="_blank">Watch</a>
+                    <button class="btn btn-del" onclick="deleteRoom('{{ r.slug }}')">✕</button>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Aucune room active.</div>
+    {% endif %}
+
+    <p class="refresh">Auto-refresh dans 30s</p>
+
+    <script>
+    async function deleteRoom(slug) {
+        if (!confirm('Supprimer la room ' + slug + ' ?')) return;
+        await fetch('/admin/room/' + slug + '/delete', { method: 'POST' });
+        location.reload();
+    }
+    setTimeout(() => location.reload(), 30000);
+    </script>
+</body>
+</html>
