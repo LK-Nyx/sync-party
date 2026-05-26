@@ -1,48 +1,94 @@
 #!/usr/bin/env python3
-"""Sync Party v3 — secure, synced watch party. No passwords in URLs."""
+"""Sync Party v3.2 — structured logging, secure auth, full sync."""
 
 import json
+import logging
 import os
 import secrets
+import sys
 import time
 import hmac
 import hashlib
+import uuid
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 import qrcode
 import io
-import base64
 from jinja2 import Environment, FileSystemLoader
 from providers.base import list_all as list_providers, get as get_provider
 import providers.youtube
 import providers.spotify
 
+# ── Structured logging ─────────────────────────────────────────
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+class StructuredFormatter(logging.Formatter):
+    """ts=ISO level=LEVEL rid=ID key=value msg=..."""
+    def format(self, record: logging.LogRecord) -> str:
+        import datetime
+        ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(datetime.datetime.utcnow().microsecond/1000):03d}Z"
+        fields = [f"ts={ts}", f"level={record.levelname}"]
+        for attr in ("rid", "slug", "role", "ip", "method", "path", "status", "ms"):
+            val = getattr(record, attr, None)
+            if val is not None:
+                fields.append(f"{attr}={val}")
+        fields.append(f"msg={record.getMessage()}")
+        return " ".join(fields)
+
+logger = logging.getLogger("sync-party")
+logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(StructuredFormatter())
+logger.handlers = [handler]
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        rid = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
+        request.state.rid = rid
+        start = time.monotonic()
+        response = await call_next(request)
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        logger.info(
+            f"req method={request.method} path={request.url.path} status={response.status_code} ms={elapsed_ms}",
+            extra={
+                "rid": rid, "ip": request.client.host if request.client else "-",
+                "method": request.method, "path": request.url.path,
+                "status": response.status_code, "ms": elapsed_ms,
+                "slug": request.path_params.get("slug", "-"),
+            },
+        )
+        return response
+
 # ── Config ─────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
 SERVER_SECRET = secrets.token_hex(32)
 SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PWD", "changeme_superadmin")
-ROOM_TTL = 7200
-MAX_ROOMS = 50
+ROOM_TTL = int(os.environ.get("ROOM_TTL", "7200"))
+MAX_ROOMS = int(os.environ.get("MAX_ROOMS", "50"))
 RATE_WINDOW = 60
 RATE_MAX_CREATE = 5
 RATE_MAX_LOGIN = 15
 
-# ── Cookie helper (respects Render proxy TLS termination) ──────
+logger.info("startup", extra={"rid": "boot", "msg": f"secret={'set' if SERVER_SECRET else 'unset'} ttl={ROOM_TTL}s max_rooms={MAX_ROOMS}"})
+
+# ── Cookie helper ──────────────────────────────────────────────
 def _is_secure(request: Optional[Request] = None) -> bool:
-    """On Render, the proxy sets X-Forwarded-Proto. Use that to decide secure cookies."""
     if request is None:
         return False
-    proto = request.headers.get("X-Forwarded-Proto", "")
-    return proto == "https"
+    return request.headers.get("X-Forwarded-Proto", "") == "https"
 
 def _set_auth_cookie(resp: RedirectResponse, name: str, token: str, request: Optional[Request] = None):
-    resp.set_cookie(name, token, httponly=True, samesite="lax",
-                    max_age=ROOM_TTL, secure=_is_secure(request))
+    secure = _is_secure(request)
+    resp.set_cookie(name, token, httponly=True, samesite="lax", max_age=ROOM_TTL, secure=secure)
+    logger.debug("cookie_set", extra={"rid": getattr(request, "state", None) and request.state.rid or "?", "name": name[:20], "secure": str(secure)})
 
+# ── App ────────────────────────────────────────────────────────
 app = FastAPI(title="Sync Party")
+app.add_middleware(RequestIDMiddleware)
 _jinja = Environment(loader=FileSystemLoader(BASE_DIR / "templates"))
 
 # ── Rate limiter ───────────────────────────────────────────────
@@ -52,12 +98,12 @@ def _ratelimit(key: str, max_req: int = RATE_MAX_LOGIN) -> bool:
     now = time.time()
     bucket = _rate.setdefault(key, [])
     bucket[:] = [t for t in bucket if now - t < RATE_WINDOW]
-    if len(bucket) >= max_req:
-        return False
-    bucket.append(now)
-    return True
+    ok = len(bucket) < max_req
+    if ok:
+        bucket.append(now)
+    return ok
 
-# ── Auth (HMAC-signed cookies — no passwords in URLs) ─────────
+# ── Auth ───────────────────────────────────────────────────────
 def _sign(slug: str, role: str) -> str:
     payload = f"{slug}:{role}:{int(time.time())}"
     sig = hmac.new(SERVER_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
@@ -66,24 +112,21 @@ def _sign(slug: str, role: str) -> str:
 def _verify(token: str, slug: str, role: str = "admin") -> bool:
     try:
         parts = token.rsplit(":", 1)
-        payload, sig = parts[0], parts[1]
-        expected = hmac.new(SERVER_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
-        if not hmac.compare_digest(sig, expected):
+        expected = hmac.new(SERVER_SECRET.encode(), parts[0].encode(), hashlib.sha256).hexdigest()[:24]
+        if not hmac.compare_digest(parts[1], expected):
             return False
-        t_slug, t_role, _ = payload.split(":")
+        t_slug, t_role, _ = parts[0].split(":")
         return t_slug == slug and (role == "any" or t_role == role)
     except (ValueError, IndexError):
         return False
 
 def _verify_superadmin(token: str) -> bool:
-    """Verify a super-admin token (not tied to a specific room slug)."""
     try:
         parts = token.rsplit(":", 1)
-        payload, sig = parts[0], parts[1]
-        expected = hmac.new(SERVER_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
-        if not hmac.compare_digest(sig, expected):
+        expected = hmac.new(SERVER_SECRET.encode(), parts[0].encode(), hashlib.sha256).hexdigest()[:24]
+        if not hmac.compare_digest(parts[1], expected):
             return False
-        _, t_role, _ = payload.split(":")
+        _, t_role, _ = parts[0].split(":")
         return t_role == "superadmin"
     except (ValueError, IndexError):
         return False
@@ -92,9 +135,6 @@ def _sign_superadmin() -> str:
     payload = f"global:superadmin:{int(time.time())}"
     sig = hmac.new(SERVER_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
     return f"{payload}:{sig}"
-
-def _cookie_auth(request: Request) -> Optional[str]:
-    return request.cookies.get("sync_party_auth")
 
 # ── Room store ─────────────────────────────────────────────────
 rooms: dict[str, "Room"] = {}
@@ -126,25 +166,20 @@ class Room:
 
     def player_state(self) -> dict:
         return {
-            "type": "player_state",
-            "video_id": self.video_id,
-            "video_title": self.video_title,
-            "state": self.state,
-            "current_time": self.current_time,
-            "global_mode": self.global_mode,
-            "playlist_url": self.playlist_url,
-            "provider": self.provider,
+            "type": "player_state", "video_id": self.video_id, "video_title": self.video_title,
+            "state": self.state, "current_time": self.current_time,
+            "global_mode": self.global_mode, "playlist_url": self.playlist_url, "provider": self.provider,
         }
 
     def viewer_list(self) -> list[dict]:
-        return [{
-            "name": v["name"], "mode": v["mode"],
-            "muted": v["muted"], "is_dj": v["is_dj"], "role": v["role"],
-        } for v in self.viewer_ws]
+        return [{"name": v["name"], "mode": v["mode"], "muted": v["muted"], "is_dj": v["is_dj"], "role": v["role"]} for v in self.viewer_ws]
 
 def _cleanup():
-    for s in [s for s, r in rooms.items() if r.expired()]:
+    expired = [(s, r.name) for s, r in rooms.items() if r.expired()]
+    for s, _ in expired:
         del rooms[s]
+    if expired:
+        logger.info("cleanup", extra={"rid": "sched", "count": str(len(expired))})
 
 # ── Helpers ────────────────────────────────────────────────────
 def render(tpl: str, **kw) -> str:
@@ -165,6 +200,8 @@ async def _bcast(room: Room, msg: dict, exclude: Optional[WebSocket] = None):
             room.viewer_ws.remove(d)
         except ValueError:
             pass
+    if dead:
+        logger.debug("bcast_dead", extra={"slug": room.slug, "dead": str(len(dead)), "total": str(len(room.viewer_ws))})
 
 async def _tell_admin(room: Room, msg: dict):
     if room.admin_ws:
@@ -172,6 +209,7 @@ async def _tell_admin(room: Room, msg: dict):
             await room.admin_ws.send_text(json.dumps(msg))
         except Exception:
             room.admin_ws = None
+            logger.debug("broadcast_fail", extra={"slug": room.slug, "reason": "ws_send_failed"})
 
 # ── Routes ─────────────────────────────────────────────────────
 
@@ -179,57 +217,61 @@ async def _tell_admin(room: Room, msg: dict):
 async def index():
     return HTMLResponse(render("index.html"))
 
-
 @app.post("/create")
 async def create_room(request: Request, name: str = Form(...), admin_password: str = Form(...)):
+    rid = request.state.rid
     ip = request.client.host if request.client else "unknown"
     if not _ratelimit(f"create:{ip}", RATE_MAX_CREATE):
+        logger.warning("ratelimit_hit", extra={"rid": rid, "ip": ip, "action": "create"})
         raise HTTPException(429, "Too many rooms. Wait.")
     _cleanup()
     if len(rooms) >= MAX_ROOMS:
+        logger.warning("max_rooms", extra={"rid": rid, "count": str(len(rooms))})
         raise HTTPException(429, "Server full.")
-
     slug = secrets.token_hex(4)
     rooms[slug] = Room(slug, name, admin_password)
     token = _sign(slug, "admin")
     resp = RedirectResponse(f"/party/{slug}/admin", status_code=303)
     _set_auth_cookie(resp, "sync_party_auth", token, request)
+    logger.info("room_created", extra={"rid": rid, "slug": slug, "name": name[:50], "ip": ip})
     return resp
-
 
 @app.get("/party/{slug}/admin", response_class=HTMLResponse)
 async def admin_page(request: Request, slug: str):
+    rid = request.state.rid
     room = rooms.get(slug)
     if not room:
+        logger.warning("admin_404", extra={"rid": rid, "slug": slug, "reason": "unknown_slug"})
         raise HTTPException(404)
-    token = _cookie_auth(request)
+    token = request.cookies.get("sync_party_auth", "")
     if not token or not _verify(token, slug, "admin"):
+        logger.debug("admin_noauth", extra={"rid": rid, "slug": slug, "has_token": str(bool(token))})
         return HTMLResponse(render("admin_login.html", slug=slug, name=room.name))
     room.touch()
-    return HTMLResponse(render("admin.html",
-        slug=slug, name=room.name,
-        playlist_url=room.playlist_url,
-        global_mode=room.global_mode,
-        provider=room.provider,
-        auth_token=token,
-    ))
-
+    logger.info("admin_page", extra={"rid": rid, "slug": slug, "name": room.name[:50]})
+    return HTMLResponse(render("admin.html", slug=slug, name=room.name,
+        playlist_url=room.playlist_url, global_mode=room.global_mode,
+        provider=room.provider, auth_token=token))
 
 @app.post("/party/{slug}/login")
 async def admin_login(request: Request, slug: str, password: str = Form(...)):
+    rid = request.state.rid
+    ip = request.client.host if request.client else "unknown"
     room = rooms.get(slug)
     if not room:
+        logger.warning("login_404", extra={"rid": rid, "slug": slug})
         raise HTTPException(404)
-    ip = request.client.host if request.client else "unknown"
     if not _ratelimit(f"login:{slug}:{ip}", RATE_MAX_LOGIN):
+        logger.warning("ratelimit_hit", extra={"rid": rid, "slug": slug, "ip": ip, "action": "login"})
         raise HTTPException(429, "Trop de tentatives.")
     if password != room.admin_password:
+        logger.info("login_fail", extra={"rid": rid, "slug": slug, "ip": ip})
         raise HTTPException(401, "Mot de passe incorrect.")
+    logger.info("login_ok", extra={"rid": rid, "slug": slug, "name": room.name[:50], "ip": ip})
     token = _sign(slug, "admin")
     resp = RedirectResponse(f"/party/{slug}/admin", status_code=303)
     _set_auth_cookie(resp, "sync_party_auth", token, request)
     return resp
-
 
 @app.get("/party/{slug}", response_class=HTMLResponse)
 async def watch_page(slug: str):
@@ -238,7 +280,6 @@ async def watch_page(slug: str):
         raise HTTPException(404)
     room.touch()
     return HTMLResponse(render("watch.html", slug=slug, name=room.name))
-
 
 @app.get("/party/{slug}/qr")
 async def qr_img(slug: str):
@@ -252,10 +293,8 @@ async def qr_img(slug: str):
     buf.seek(0)
     return Response(content=buf.read(), media_type="image/png")
 
-
 @app.get("/api/room/{slug}/state")
 async def room_state(slug: str):
-    """Cold-start: viewer gets current state when loading page."""
     room = rooms.get(slug)
     if not room:
         raise HTTPException(404)
@@ -264,96 +303,99 @@ async def room_state(slug: str):
     st["viewer_count"] = len(room.viewer_ws)
     return st
 
-
 @app.get("/providers")
 async def providers_list():
     return [p.__dict__ for p in list_providers()]
-
 
 @app.get("/health")
 async def health():
     _cleanup()
     return {"status": "ok", "rooms": len(rooms)}
 
-
-# ── Super-admin dashboard ─────────────────────────────────────
+# ── Super-admin ────────────────────────────────────────────────
 
 @app.get("/admin", response_class=HTMLResponse)
 async def superadmin_login_page(request: Request):
-    token = _cookie_auth(request)
+    token = request.cookies.get("sync_party_su", "")
     if token and _verify_superadmin(token):
         return RedirectResponse("/admin/dashboard", status_code=303)
     return HTMLResponse(render("superadmin_login.html"))
 
-
 @app.post("/admin/login")
 async def superadmin_login(request: Request, password: str = Form(...)):
+    rid = request.state.rid
     ip = request.client.host if request.client else "unknown"
     if not _ratelimit(f"superadmin:{ip}", 5):
+        logger.warning("ratelimit_hit", extra={"rid": rid, "ip": ip, "action": "superadmin_login"})
         raise HTTPException(429, "Trop de tentatives.")
     if password != SUPER_ADMIN_PASSWORD:
+        logger.info("superadmin_fail", extra={"rid": rid, "ip": ip})
         raise HTTPException(401, "Mot de passe incorrect.")
+    logger.info("superadmin_ok", extra={"rid": rid, "ip": ip})
     token = _sign_superadmin()
     resp = RedirectResponse("/admin/dashboard", status_code=303)
     _set_auth_cookie(resp, "sync_party_su", token, request)
     return resp
 
-
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def superadmin_dashboard(request: Request):
+    rid = request.state.rid
     token = request.cookies.get("sync_party_su", "")
     if not token or not _verify_superadmin(token):
+        logger.debug("superadmin_noauth", extra={"rid": rid, "has_token": str(bool(token))})
         return RedirectResponse("/admin", status_code=303)
     _cleanup()
-    room_list = [
-        {
-            "slug": r.slug,
-            "name": r.name,
-            "provider": r.provider,
-            "playlist_url": r.playlist_url or "-",
-            "state": ["⏹", "▶", "⏸"][r.state + 1 if -1 <= r.state <= 2 else 0],
-            "viewers": len(r.viewer_ws),
-            "age": int(time.time() - r.created_at),
-            "admin_online": r.admin_ws is not None,
-        }
-        for r in rooms.values()
-    ]
+    room_list = [{
+        "slug": r.slug, "name": r.name, "provider": r.provider,
+        "playlist_url": r.playlist_url or "-",
+        "state": ["⏹", "▶", "⏸"][r.state + 1 if -1 <= r.state <= 2 else 0],
+        "viewers": len(r.viewer_ws), "age": int(time.time() - r.created_at),
+        "admin_online": r.admin_ws is not None,
+    } for r in rooms.values()]
     room_list.sort(key=lambda r: r["viewers"], reverse=True)
+    logger.info("superadmin_dashboard", extra={"rid": rid, "rooms": str(len(room_list))})
     return HTMLResponse(render("superadmin_dashboard.html", rooms=room_list))
-
 
 @app.post("/admin/room/{slug}/delete")
 async def superadmin_delete_room(request: Request, slug: str):
+    rid = request.state.rid
     token = request.cookies.get("sync_party_su", "")
     if not token or not _verify_superadmin(token):
         raise HTTPException(403)
     room = rooms.pop(slug, None)
     if not room:
         raise HTTPException(404, "Room not found")
+    logger.info("room_deleted", extra={"rid": rid, "slug": slug, "name": room.name[:50], "by": "superadmin"})
     return {"deleted": slug, "name": room.name}
 
-
-# ── Run ────────────────────────────────────────────────────────
 # ── WebSocket ──────────────────────────────────────────────────
 
 @app.websocket("/ws/{slug}")
 async def ws_endpoint(ws: WebSocket, slug: str):
+    qp = dict(ws.query_params)
+    role_hint = qp.get("role", "viewer")
+    logger.debug("ws_connect", extra={"slug": slug, "role": role_hint})
+
     room = rooms.get(slug)
     if not room:
         await ws.accept()
         await ws.send_text(json.dumps({"type": "error", "message": "Room not found"}))
         await ws.close(code=4004, reason="Room not found")
+        logger.info("ws_reject", extra={"slug": slug, "reason": "unknown_room", "role": role_hint})
         return
+
     await ws.accept()
     room.touch()
+    logger.debug("ws_accepted", extra={"slug": slug, "role": role_hint})
 
-    viewer = None  # will be set for non-admin roles
+    viewer = None
 
-    # Client must send auth as first message
+    # Auth: first message must be auth payload
     try:
         raw = await ws.receive_text()
         auth = json.loads(raw)
     except WebSocketDisconnect:
+        logger.debug("ws_auth_timeout", extra={"slug": slug})
         await ws.close(code=4001)
         return
     except json.JSONDecodeError:
@@ -369,6 +411,7 @@ async def ws_endpoint(ws: WebSocket, slug: str):
         if _verify(token, slug, "admin"):
             role = "admin"
         else:
+            logger.warning("ws_bad_admin", extra={"slug": slug, "role": role_hint})
             await ws.send_text(json.dumps({"type": "error", "message": "Bad admin token"}))
             await ws.close(code=4001)
             return
@@ -376,35 +419,26 @@ async def ws_endpoint(ws: WebSocket, slug: str):
         if token == room.moderator_password:
             role = "moderator"
 
-    # ── Register ────────────────────────────────────────────
+    # Register
     if role == "admin":
         room.admin_ws = ws
-        await ws.send_text(json.dumps({
-            "type": "auth_ok", "role": "admin",
-            "viewers": room.viewer_list(),
-        }))
+        logger.info("ws_admin_joined", extra={"slug": slug, "viewers": str(len(room.viewer_ws))})
+        await ws.send_text(json.dumps({"type": "auth_ok", "role": "admin", "viewers": room.viewer_list()}))
     else:
         name = f"Guest-{secrets.token_hex(2)}"
         is_dj = room.guest_dj_enabled or role == "moderator"
-        viewer = {"ws": ws, "name": name, "mode": room.global_mode,
-                  "muted": False, "is_dj": is_dj, "role": role}
+        viewer = {"ws": ws, "name": name, "mode": room.global_mode, "muted": False, "is_dj": is_dj, "role": role}
         room.viewer_ws.append(viewer)
+        logger.info("ws_viewer_joined", extra={"slug": slug, "name": name, "role": role, "total": str(len(room.viewer_ws))})
 
         state = room.player_state()
         state["viewer_count"] = len(room.viewer_ws)
         state["your_name"] = name
         await ws.send_text(json.dumps(state))
+        await _tell_admin(room, {"type": "viewer_join", "viewer": name, "viewers": room.viewer_list()})
+        await _bcast(room, {"type": "viewer_joined", "name": name, "count": len(room.viewer_ws)}, exclude=ws)
 
-        await _tell_admin(room, {
-            "type": "viewer_join", "viewer": name,
-            "viewers": room.viewer_list(),
-        })
-        await _bcast(room, {
-            "type": "viewer_joined", "name": name,
-            "count": len(room.viewer_ws),
-        }, exclude=ws)
-
-    # ── Message loop ─────────────────────────────────────────
+    # Message loop
     try:
         while True:
             data = await ws.receive_text()
@@ -414,52 +448,43 @@ async def ws_endpoint(ws: WebSocket, slug: str):
             else:
                 await _viewer_msg(room, msg, viewer)
     except WebSocketDisconnect:
+        logger.debug("ws_disconnect", extra={"slug": slug, "role": role})
         pass
     finally:
         if role == "admin":
             room.admin_ws = None
+            logger.info("ws_admin_left", extra={"slug": slug})
         else:
-            vname = viewer.get("name", "???")
             try:
                 room.viewer_ws.remove(viewer)
-            except ValueError:
+            except (ValueError, NameError):
                 pass
-            await _tell_admin(room, {
-                "type": "viewer_leave", "viewer": vname,
-                "viewers": room.viewer_list(),
-            })
-            await _bcast(room, {
-                "type": "viewer_left", "name": vname,
-                "count": len(room.viewer_ws),
-            })
-
+            vname = viewer.get("name", "???") if viewer else "???"
+            logger.info("ws_viewer_left", extra={"slug": slug, "name": vname, "remaining": str(len(room.viewer_ws))})
+            await _tell_admin(room, {"type": "viewer_leave", "viewer": vname, "viewers": room.viewer_list()})
+            await _bcast(room, {"type": "viewer_left", "name": vname, "count": len(room.viewer_ws)})
 
 # ── Message handlers ──────────────────────────────────────────
 
 async def _admin_msg(room: Room, msg: dict):
     t = msg.get("type", "")
-
     if t == "player_update":
         room.video_id = msg.get("video_id", room.video_id)
         room.video_title = msg.get("title", room.video_title)
         room.state = msg.get("state", room.state)
         room.current_time = msg.get("current_time", room.current_time)
         await _bcast(room, room.player_state())
-
     elif t == "set_playlist":
         room.playlist_url = msg["url"]
         room.video_id = msg.get("video_id", "")
-        await _bcast(room, {"type": "playlist_set", "url": room.playlist_url,
-                            "video_id": room.video_id})
-
+        logger.info("playlist_set", extra={"slug": room.slug, "url": room.playlist_url[:80]})
+        await _bcast(room, {"type": "playlist_set", "url": room.playlist_url, "video_id": room.video_id})
     elif t == "set_provider":
         room.provider = msg["provider"]
         await _bcast(room, {"type": "provider_changed", "provider": room.provider})
-
     elif t == "set_mode":
         room.global_mode = msg["mode"]
         await _bcast(room, {"type": "mode_changed", "mode": room.global_mode})
-
     elif t == "force_mode":
         target = msg.get("target", "all")
         mode = msg["mode"]
@@ -473,29 +498,17 @@ async def _admin_msg(room: Room, msg: dict):
                     v["mode"] = mode
         await _bcast(room, {"type": "mode_forced", "target": target, "mode": mode})
         await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-
-    elif t == "mute_viewer":
+    elif t in ("mute_viewer", "unmute_viewer"):
         target = msg["target"]
+        muted = t == "mute_viewer"
         for v in room.viewer_ws:
             if v["name"] == target:
-                v["muted"] = True
+                v["muted"] = muted
                 try:
-                    await v["ws"].send_text(json.dumps({"type": "muted"}))
+                    await v["ws"].send_text(json.dumps({"type": "muted" if muted else "unmuted"}))
                 except Exception:
                     pass
         await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-
-    elif t == "unmute_viewer":
-        target = msg["target"]
-        for v in room.viewer_ws:
-            if v["name"] == target:
-                v["muted"] = False
-                try:
-                    await v["ws"].send_text(json.dumps({"type": "unmuted"}))
-                except Exception:
-                    pass
-        await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-
     elif t == "kick_viewer":
         target = msg["target"]
         for v in room.viewer_ws[:]:
@@ -506,9 +519,9 @@ async def _admin_msg(room: Room, msg: dict):
                 except Exception:
                     pass
                 room.viewer_ws.remove(v)
+        logger.info("viewer_kicked", extra={"slug": room.slug, "target": target})
         await _bcast(room, {"type": "viewer_kicked", "name": target})
         await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-
     elif t == "promote_dj":
         target = msg["target"]
         for v in room.viewer_ws:
@@ -518,27 +531,20 @@ async def _admin_msg(room: Room, msg: dict):
             except Exception:
                 pass
         await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-
     elif t == "show_qr":
         url = room.playlist_url or f"https://sync-party.onrender.com/party/{room.slug}"
         await _bcast(room, {"type": "show_qr", "url": url})
-
     elif t == "hide_qr":
         await _bcast(room, {"type": "hide_qr"})
 
-
 async def _viewer_msg(room: Room, msg: dict, viewer: dict):
     t = msg.get("type", "")
-
     if t == "set_name":
         viewer["name"] = msg["name"]
         await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-
-    elif t == "set_mode":
-        if not viewer.get("muted"):
-            viewer["mode"] = msg["mode"]
-            await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-
+    elif t == "set_mode" and not viewer.get("muted"):
+        viewer["mode"] = msg["mode"]
+        await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
     elif viewer.get("role") == "moderator":
         if t == "set_playlist":
             room.playlist_url = msg["url"]
@@ -550,15 +556,12 @@ async def _viewer_msg(room: Room, msg: dict, viewer: dict):
         elif t == "set_provider":
             room.provider = msg["provider"]
             await _bcast(room, {"type": "provider_changed", "provider": room.provider})
-
     elif t == "dj_command" and viewer.get("is_dj"):
         cmd = msg.get("command", "")
         if cmd in ("next", "prev"):
             await _tell_admin(room, {"type": "dj_request", "viewer": viewer["name"], "command": cmd})
 
-
 # ── Run ────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
