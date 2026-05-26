@@ -28,22 +28,31 @@ def main():
     print(f"# Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*60}")
 
-    # 1. Create room → get slug
-    print("\n📦 1. Creating room...")
+    # 1. Create room → get slug (with rate-limit retry)
+    print("📦 1. Creating room (retry until rate limit clears)...")
     cj = tempfile.mktemp(suffix=".cookies")
-    r = subprocess.run([
-        "curl", "-s", "-c", cj, "-b", cj, "-L",
-        "-X", "POST", "-d", "name=WSTest&admin_password=wspwd",
-        "-H", "Content-Type: application/x-www-form-urlencoded",
-        "--max-time", "10", f"{URL}/create",
-    ], capture_output=True, text=True, timeout=15)
-    final_url = r.stdout.strip().split("\n")[-1] if r.stdout.strip() else ""
-    m = re.search(r"/party/([a-f0-9]+)/admin", final_url)
-    slug = m.group(1) if m else None
+    slug = None
+    for attempt in range(5):
+        if attempt > 0:
+            print(f"  Retry {attempt}/4 in 65s (rate limit)...")
+            time.sleep(65)
+        r = subprocess.run([
+            "curl", "-s", "-c", cj, "-b", cj, "-L",
+            "-X", "POST", "-d", "name=WSTest&admin_password=wspwd",
+            "-H", "Content-Type: application/x-www-form-urlencoded",
+            "--max-time", "10", f"{URL}/create",
+        ], capture_output=True, text=True, timeout=15)
+        lines = r.stdout.strip().split("\n")
+        final_url = lines[-1] if lines else ""
+        m = re.search(r"/party/([a-f0-9]+)/admin", final_url)
+        slug = m.group(1) if m else None
+        if slug:
+            print(f"  ✅ Room created: {slug}")
+            break
+        print(f"  ⚠️ Create failed (rate limit?), waiting...")
     if not slug:
-        print("❌ No slug — abort")
+        print("❌ No slug after 5 attempts — abort")
         sys.exit(1)
-    print(f"✅ Room created: {slug}")
 
     # 2. Get admin auth token from cookie file
     with open(cj) as f:
