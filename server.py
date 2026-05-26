@@ -30,6 +30,18 @@ RATE_WINDOW = 60
 RATE_MAX_CREATE = 5
 RATE_MAX_LOGIN = 15
 
+# ── Cookie helper (respects Render proxy TLS termination) ──────
+def _is_secure(request: Optional[Request] = None) -> bool:
+    """On Render, the proxy sets X-Forwarded-Proto. Use that to decide secure cookies."""
+    if request is None:
+        return False
+    proto = request.headers.get("X-Forwarded-Proto", "")
+    return proto == "https"
+
+def _set_auth_cookie(resp: RedirectResponse, name: str, token: str, request: Optional[Request] = None):
+    resp.set_cookie(name, token, httponly=True, samesite="lax",
+                    max_age=ROOM_TTL, secure=_is_secure(request))
+
 app = FastAPI(title="Sync Party")
 _jinja = Environment(loader=FileSystemLoader(BASE_DIR / "templates"))
 
@@ -181,8 +193,7 @@ async def create_room(request: Request, name: str = Form(...), admin_password: s
     rooms[slug] = Room(slug, name, admin_password)
     token = _sign(slug, "admin")
     resp = RedirectResponse(f"/party/{slug}/admin", status_code=303)
-    resp.set_cookie("sync_party_auth", token, httponly=True, samesite="strict",
-                    max_age=ROOM_TTL, secure=True)
+    _set_auth_cookie(resp, "sync_party_auth", token, request)
     return resp
 
 
@@ -216,8 +227,7 @@ async def admin_login(request: Request, slug: str, password: str = Form(...)):
         raise HTTPException(401, "Mot de passe incorrect.")
     token = _sign(slug, "admin")
     resp = RedirectResponse(f"/party/{slug}/admin", status_code=303)
-    resp.set_cookie("sync_party_auth", token, httponly=True, samesite="strict",
-                    max_age=ROOM_TTL, secure=True)
+    _set_auth_cookie(resp, "sync_party_auth", token, request)
     return resp
 
 
@@ -285,8 +295,7 @@ async def superadmin_login(request: Request, password: str = Form(...)):
         raise HTTPException(401, "Mot de passe incorrect.")
     token = _sign_superadmin()
     resp = RedirectResponse("/admin/dashboard", status_code=303)
-    resp.set_cookie("sync_party_su", token, httponly=True, samesite="strict",
-                    max_age=ROOM_TTL, secure=True)
+    _set_auth_cookie(resp, "sync_party_su", token, request)
     return resp
 
 
