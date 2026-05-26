@@ -88,7 +88,7 @@ RATE_WINDOW = 60
 RATE_MAX_CREATE = 5
 RATE_MAX_LOGIN = 15
 
-logger.info("startup", extra={"rid": "boot", "msg": f"secret={'set' if SERVER_SECRET else 'unset'} ttl={ROOM_TTL}s max_rooms={MAX_ROOMS}"})
+logger.info(f"startup secret={'set' if SERVER_SECRET else 'unset'} ttl={ROOM_TTL}s max_rooms={MAX_ROOMS}", extra={"rid": "boot"})
 
 # ── Cookie helper ──────────────────────────────────────────────
 def _is_secure(request: Optional[Request] = None) -> bool:
