@@ -15,8 +15,9 @@ SUPERADMIN_PWD = os.environ.get("SUPER_ADMIN_PWD", "changeme_superadmin")
 RATE_MAX = 5
 
 
-def curl(path, method="GET", data=None, cj=None, follow=False):
-    """curl → (http_code: str, body: str, cj_path: str, final_url: str)"""
+def curl(path, method="GET", data=None, cj=None, follow=False, raw=False):
+    """curl → (http_code: str, body: str, cj_path: str, final_url: str)
+    raw=True: body is bytes (for binary endpoints like QR)."""
     cj = cj or tempfile.mktemp(suffix=".cookies")
     cmd = ["curl", "-s", "-w", "\n%{http_code}\n%{url_effective}",
            "-b", cj, "-c", cj, "--max-time", "15", "-X", method]
@@ -26,7 +27,14 @@ def curl(path, method="GET", data=None, cj=None, follow=False):
         cmd += ["-L"]
     cmd.append(f"{URL}{path}")
 
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    r = subprocess.run(cmd, capture_output=True, text=not raw, timeout=20)
+    if raw:
+        stdout = r.stdout.decode("latin-1")  # binary-safe text extraction
+        lines = stdout.strip().split("\n")
+        code = lines[-2] if len(lines) >= 2 else "000"
+        final = lines[-1] if len(lines) >= 1 else ""
+        body = r.stdout  # raw bytes
+        return code.strip(), body, cj, final
     lines = r.stdout.strip().split("\n")
     code = lines[-2] if len(lines) >= 2 else "000"
     final = lines[-1] if len(lines) >= 1 else ""
@@ -110,9 +118,9 @@ def main():
     # ── 5. QR code ──────────────────────────────────────────────
     sec("5. QR code")
     if slug:
-        c, body, _, _ = curl(f"/party/{slug}/qr")
+        c, body, _, _ = curl(f"/party/{slug}/qr", raw=True)
         chk("QR 200", c == "200")
-        chk("PNG > 200B", len(body.encode()) > 200)
+        chk("PNG > 200B", len(body) > 200)
 
     # ── 6. Super-admin flow ─────────────────────────────────────
     sec("6. Super-admin flow")
