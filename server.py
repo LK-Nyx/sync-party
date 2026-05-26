@@ -45,6 +45,21 @@ handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(StructuredFormatter())
 logger.handlers = [handler]
 
+# In-memory ring buffer for the last N log messages (accessible via /admin/logs)
+_LOG_RING_SIZE = int(os.environ.get("LOG_RING_SIZE", "500"))
+_log_ring: list[str] = []
+
+class RingBufferHandler(logging.Handler):
+    """Captures formatted log records into a fixed-size ring buffer."""
+    def emit(self, record: logging.LogRecord) -> None:
+        _log_ring.append(self.format(record))
+        if len(_log_ring) > _LOG_RING_SIZE:
+            _log_ring.pop(0)
+
+ring_handler = RingBufferHandler()
+ring_handler.setFormatter(StructuredFormatter())
+logger.addHandler(ring_handler)
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         rid = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
@@ -367,6 +382,19 @@ async def superadmin_delete_room(request: Request, slug: str):
         raise HTTPException(404, "Room not found")
     logger.info("room_deleted", extra={"rid": rid, "slug": slug, "name": room.name[:50], "by": "superadmin"})
     return {"deleted": slug, "name": room.name}
+
+
+@app.get("/admin/logs")
+async def superadmin_logs(request: Request, n: int = 100, level: str = ""):
+    """Return the last N log lines from the ring buffer. Auth: super-admin cookie."""
+    token = request.cookies.get("sync_party_su", "")
+    if not token or not _verify_superadmin(token):
+        raise HTTPException(403)
+    lines = _log_ring[-n:]
+    if level:
+        lines = [l for l in lines if f"level={level.upper()}" in l]
+    return Response(content="\n".join(lines), media_type="text/plain")
+
 
 # ── WebSocket ──────────────────────────────────────────────────
 
