@@ -37,13 +37,15 @@ def main():
             print(f"  Retry {attempt}/4 in 65s (rate limit)...")
             time.sleep(65)
         r = subprocess.run([
-            "curl", "-s", "-c", cj, "-b", cj, "-L",
+            "curl", "-s", "-w", "\n%{http_code}\n%{url_effective}",
+            "-c", cj, "-b", cj, "-L",
             "-X", "POST", "-d", "name=WSTest&admin_password=wspwd",
             "-H", "Content-Type: application/x-www-form-urlencoded",
             "--max-time", "10", f"{URL}/create",
         ], capture_output=True, text=True, timeout=15)
         lines = r.stdout.strip().split("\n")
-        final_url = lines[-1] if lines else ""
+        http_code = lines[-2] if len(lines) >= 2 else "000"
+        final_url = lines[-1] if len(lines) >= 1 else ""
         m = re.search(r"/party/([a-f0-9]+)/admin", final_url)
         slug = m.group(1) if m else None
         if slug:
@@ -120,10 +122,10 @@ def main():
         print(f"  Admin messages: {len(admin_received)}")
         print(f"  Viewer messages: {len(viewer_received)}")
 
-        # Check sync
+        # Check sync (find MOST RECENT player_state with content)
         viewer_player_state = None
-        for msg in viewer_received:
-            if msg.get("type") == "player_state":
+        for msg in reversed(viewer_received):
+            if msg.get("type") == "player_state" and msg.get("video_title"):
                 viewer_player_state = msg
                 break
 
