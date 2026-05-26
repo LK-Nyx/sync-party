@@ -331,6 +331,8 @@ async def superadmin_delete_room(request: Request, slug: str):
 async def ws_endpoint(ws: WebSocket, slug: str):
     room = rooms.get(slug)
     if not room:
+        await ws.accept()
+        await ws.send_text(json.dumps({"type": "error", "message": "Room not found"}))
         await ws.close(code=4004, reason="Room not found")
         return
     await ws.accept()
@@ -342,7 +344,11 @@ async def ws_endpoint(ws: WebSocket, slug: str):
     try:
         raw = await ws.receive_text()
         auth = json.loads(raw)
-    except (WebSocketDisconnect, json.JSONDecodeError):
+    except WebSocketDisconnect:
+        await ws.close(code=4001)
+        return
+    except json.JSONDecodeError:
+        await ws.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
         await ws.close(code=4001)
         return
 
