@@ -118,7 +118,7 @@ def _is_secure(request: Optional[Request] = None) -> bool:
 def _set_auth_cookie(resp: RedirectResponse, name: str, token: str, request: Optional[Request] = None):
     secure = _is_secure(request)
     resp.set_cookie(name, token, httponly=True, samesite="lax", max_age=ROOM_TTL, secure=secure)
-    logger.debug("cookie_set", extra={"rid": getattr(request, "state", None) and request.state.rid or "?", "name": name[:20], "secure": str(secure)})
+    logger.debug("cookie_set", extra={"rid": getattr(request, "state", None) and request.state.rid or "?", "room_name": name[:20], "secure": str(secure)})
 
 # ── App ────────────────────────────────────────────────────────
 app = FastAPI(title="Sync Party")
@@ -267,7 +267,7 @@ async def create_room(request: Request, name: str = Form(...), admin_password: s
     token = _sign(slug, "admin")
     resp = RedirectResponse(f"/party/{slug}/admin", status_code=303)
     _set_auth_cookie(resp, "sync_party_auth", token, request)
-    logger.info("room_created", extra={"rid": rid, "slug": slug, "name": name[:50], "ip": ip})
+    logger.info("room_created", extra={"rid": rid, "slug": slug, "room_name": name[:50], "ip": ip})
     return resp
 
 @app.get("/party/{slug}/admin", response_class=HTMLResponse)
@@ -282,7 +282,7 @@ async def admin_page(request: Request, slug: str):
         logger.debug("admin_noauth", extra={"rid": rid, "slug": slug, "has_token": str(bool(token))})
         return HTMLResponse(render("admin_login.html", slug=slug, name=room.name))
     room.touch()
-    logger.info("admin_page", extra={"rid": rid, "slug": slug, "name": room.name[:50]})
+    logger.info("admin_page", extra={"rid": rid, "slug": slug, "room_name": room.name[:50]})
     return HTMLResponse(render("admin.html", slug=slug, name=room.name,
         playlist_url=room.playlist_url, global_mode=room.global_mode,
         provider=room.provider, auth_token=token))
@@ -301,7 +301,7 @@ async def admin_login(request: Request, slug: str, password: str = Form(...)):
     if password != room.admin_password:
         logger.info("login_fail", extra={"rid": rid, "slug": slug, "ip": ip})
         raise HTTPException(401, "Mot de passe incorrect.")
-    logger.info("login_ok", extra={"rid": rid, "slug": slug, "name": room.name[:50], "ip": ip})
+    logger.info("login_ok", extra={"rid": rid, "slug": slug, "room_name": room.name[:50], "ip": ip})
     token = _sign(slug, "admin")
     resp = RedirectResponse(f"/party/{slug}/admin", status_code=303)
     _set_auth_cookie(resp, "sync_party_auth", token, request)
@@ -399,7 +399,7 @@ async def superadmin_delete_room(request: Request, slug: str):
     room = rooms.pop(slug, None)
     if not room:
         raise HTTPException(404, "Room not found")
-    logger.info("room_deleted", extra={"rid": rid, "slug": slug, "name": room.name[:50], "by": "superadmin"})
+    logger.info("room_deleted", extra={"rid": rid, "slug": slug, "room_name": room.name[:50], "by": "superadmin"})
     return {"deleted": slug, "name": room.name}
 
 
@@ -476,7 +476,7 @@ async def ws_endpoint(ws: WebSocket, slug: str):
         is_dj = room.guest_dj_enabled or role == "moderator"
         viewer = {"ws": ws, "name": name, "mode": room.global_mode, "muted": False, "is_dj": is_dj, "role": role}
         room.viewer_ws.append(viewer)
-        logger.info("ws_viewer_joined", extra={"slug": slug, "name": name, "role": role, "total": str(len(room.viewer_ws))})
+        logger.info("ws_viewer_joined", extra={"slug": slug, "room_name": name, "role": role, "total": str(len(room.viewer_ws))})
 
         state = room.player_state()
         state["viewer_count"] = len(room.viewer_ws)
@@ -507,7 +507,7 @@ async def ws_endpoint(ws: WebSocket, slug: str):
             except (ValueError, NameError):
                 pass
             vname = viewer.get("name", "???") if viewer else "???"
-            logger.info("ws_viewer_left", extra={"slug": slug, "name": vname, "remaining": str(len(room.viewer_ws))})
+            logger.info("ws_viewer_left", extra={"slug": slug, "room_name": vname, "remaining": str(len(room.viewer_ws))})
             await _tell_admin(room, {"type": "viewer_leave", "viewer": vname, "viewers": room.viewer_list()})
             await _bcast(room, {"type": "viewer_left", "name": vname, "count": len(room.viewer_ws)})
 
