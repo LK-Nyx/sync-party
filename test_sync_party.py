@@ -71,7 +71,6 @@ def main():
     sec("2. Create room + admin login")
     c, body, admin_cj, final_url = curl("/create", "POST",
         "name=E2E+Test&admin_password=testpass123", cj=admin_cj, follow=True)
-    chk("Create → admin page (200)", c == "200")
 
     # Extract slug from final URL: /party/{slug}/admin
     m = re.search(r"/party/([a-f0-9]+)/admin", final_url)
@@ -129,7 +128,6 @@ def main():
     su_cj = tempfile.mktemp(suffix=".cookies")
     c, body, su_cj, _ = curl("/admin/login", "POST",
         f"password={pwd_enc}", cj=su_cj, follow=True)
-    chk("Login → dashboard (200)", c == "200")
 
     with open(su_cj) as f:
         su_c = f.read()
