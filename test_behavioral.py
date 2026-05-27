@@ -25,9 +25,14 @@ def curl(path, method="GET", data=None, cj=None, follow=False, raw=False):
     """curl → (http_code, body, cj_path, final_url)"""
     cj = cj or tempfile.mktemp(suffix=".cookies")
     cmd = ["curl", "-s", "-w", "\n%{http_code}\n%{url_effective}",
-           "-b", cj, "-c", cj, "--max-time", "15", "-X", method]
+           "-b", cj, "-c", cj, "--max-time", "15"]
+    # Only set -X for non-GET methods without data (data implies POST).
+    # Using -X POST forces the method even after redirects (303),
+    # which breaks cookie-based auth flow.
     if data is not None:
         cmd += ["-d", data, "-H", "Content-Type: application/x-www-form-urlencoded"]
+    elif method != "GET":
+        cmd += ["-X", method]
     if follow:
         cmd += ["-L"]
     cmd.append(f"{URL}{path}")
@@ -61,8 +66,8 @@ def sec(title):
 def create_room(name="BehaviorTest", pwd="testpwd123"):
     """Create a room and return (slug, cookie_jar_path) or (None, None)."""
     c, _, cj, final = curl("/create", "POST",
-                            f"name={name}&admin_password={pwd}", follow=True)
-    m = re.search(r"/party/([a-f0-9]+)/admin", final)
+                            f"name={name}&admin_password={pwd}&slug_mode=hex8", follow=True)
+    m = re.search(r"/party/([a-z0-9-]+)/admin", final)
     if not m:
         return None, None
     return m.group(1), cj
