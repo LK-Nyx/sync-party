@@ -449,7 +449,7 @@ async def watch_page(slug: str) -> HTMLResponse:
     return HTMLResponse(render("watch.html", slug=slug, name=room.name))
 
 @app.get("/party/{slug}/qr")
-async def qr_img(slug: str, type: str = "", request: Optional[Request] = None) -> Response:
+async def qr_img(slug: str, type: str = "", request: Request = None) -> Response:
     """Generate a QR code image pointing to the room (type='room') or playlist URL (default)."""
     room = rooms.get(slug)
     if not room:
