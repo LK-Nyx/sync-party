@@ -9,6 +9,8 @@ import sys
 import time
 import hmac
 import hashlib
+import re
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -96,6 +98,52 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         except Exception:
             pass
         return response
+
+# ── Slug generation ──────────────────────────────────────────────
+SLUG_MODES = ("hex8", "name4", "name")
+
+def _normalize_name(name: str) -> str:
+    """Slugify a room name: accents→ascii, lowercase, spaces→hyphens,
+       remove non-alphanumeric (except hyphens), collapse hyphens, strip edges."""
+    # Transliterate stubborn Latin chars that NFD/NFKD won't decompose
+    _LATIN_MAP = str.maketrans({
+        'Ł': 'L', 'ł': 'l', 'Đ': 'D', 'đ': 'd',
+        'Ø': 'O', 'ø': 'o', 'Æ': 'AE', 'æ': 'ae',
+        'Ð': 'D', 'ð': 'd', 'Þ': 'Th', 'þ': 'th',
+        'ß': 'ss',
+    })
+    name = name.translate(_LATIN_MAP)
+    # NFKD decomposes most accented chars (é → e + combining acute)
+    nfkd = unicodedata.normalize("NFKD", name)
+    # Remove combining marks (diacritics)
+    no_combining = "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
+    # Drop anything still non-ASCII
+    ascii_only = no_combining.encode("ascii", "ignore").decode("ascii")
+    lower = ascii_only.lower()
+    # Replace any non-alphanumeric (except hyphens/spaces) with space
+    cleaned = re.sub(r"[^a-z0-9\s-]", "", lower)
+    # Spaces and underscores → hyphens
+    cleaned = re.sub(r"[\s_]+", "-", cleaned)
+    # Collapse multiple hyphens
+    cleaned = re.sub(r"-+", "-", cleaned)
+    # Strip leading/trailing hyphens
+    cleaned = cleaned.strip("-")
+    return cleaned or "room"
+
+def _generate_slug(name: str, mode: str = "name4") -> str:
+    """Generate a slug based on the chosen mode.
+       hex8  → 8-char random hex (classic)
+       name4 → normalized name + 4-char hex suffix (default)
+       name  → normalized name only (collision = error)
+    """
+    if mode == "hex8":
+        return secrets.token_hex(4)
+    normalized = _normalize_name(name)
+    if mode == "name":
+        return normalized
+    # name4 (default)
+    suffix = secrets.token_hex(2)
+    return f"{normalized}-{suffix}"
 
 # ── Config ─────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -252,7 +300,7 @@ async def index():
     return HTMLResponse(render("index.html"))
 
 @app.post("/create")
-async def create_room(request: Request, name: str = Form(...), admin_password: str = Form(...)):
+async def create_room(request: Request, name: str = Form(...), admin_password: str = Form(...), slug_mode: str = Form("name4")):
     rid = request.state.rid
     ip = request.client.host if request.client else "unknown"
     if not _ratelimit(f"create:{ip}", RATE_MAX_CREATE):
@@ -262,12 +310,26 @@ async def create_room(request: Request, name: str = Form(...), admin_password: s
     if len(rooms) >= MAX_ROOMS:
         logger.warning("max_rooms", extra={"rid": rid, "count": str(len(rooms))})
         raise HTTPException(429, "Server full.")
-    slug = secrets.token_hex(4)
+    # Validate slug_mode
+    if slug_mode not in SLUG_MODES:
+        slug_mode = "name4"
+    # Generate slug with collision handling
+    slug = _generate_slug(name, slug_mode)
+    attempts = 0
+    while slug in rooms and attempts < 10:
+        if slug_mode == "name":
+            # name mode: can't auto-resolve, reject
+            raise HTTPException(409, f"Slug '{slug}' déjà pris. Choisis un autre nom ou utilise le mode nom+code.")
+        # Regenerate with new random suffix
+        slug = _generate_slug(name, slug_mode)
+        attempts += 1
+    if slug in rooms:
+        raise HTTPException(409, "Slug collision — réessaie.")
     rooms[slug] = Room(slug, name, admin_password)
     token = _sign(slug, "admin")
     resp = RedirectResponse(f"/party/{slug}/admin", status_code=303)
     _set_auth_cookie(resp, "sync_party_auth", token, request)
-    logger.info("room_created", extra={"rid": rid, "slug": slug, "room_name": name[:50], "ip": ip})
+    logger.info("room_created", extra={"rid": rid, "slug": slug, "slug_mode": slug_mode, "room_name": name[:50], "ip": ip})
     return resp
 
 @app.get("/party/{slug}/admin", response_class=HTMLResponse)

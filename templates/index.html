@@ -32,7 +32,7 @@
         }
         .subtitle { color: #888; margin-bottom: 30px; font-size: 0.95rem; }
         label { display: block; margin: 16px 0 6px; color: #aaa; font-size: 0.9rem; }
-        input {
+        input, select {
             width: 100%;
             padding: 12px;
             border: 1px solid #333;
@@ -41,7 +41,11 @@
             color: #eee;
             font-size: 1rem;
         }
-        input:focus { outline: none; border-color: #8338ec; }
+        input:focus, select:focus { outline: none; border-color: #8338ec; }
+        select { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L2 5h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+        select option { background: #111; color: #eee; }
+        .slug-preview { margin-top: 6px; font-size: 0.8rem; color: #666; min-height: 1.2em; }
+        .slug-preview span { color: #8338ec; }
         button {
             width: 100%;
             margin-top: 24px;
@@ -78,6 +82,14 @@
             
             <label for="admin_password">Mot de passe admin</label>
             <input type="password" id="admin_password" name="admin_password" placeholder="Choisis un mot de passe" required>
+
+            <label for="slug_mode">Format du lien</label>
+            <select id="slug_mode" name="slug_mode">
+                <option value="name4" selected>Nom + code — /party/soiree-80s-X7k2</option>
+                <option value="name">Nom seul — /party/soiree-80s</option>
+                <option value="hex8">Code aléatoire — /party/a1b2c3d4</option>
+            </select>
+            <div class="slug-preview" id="slug-preview"></div>
             
             <button type="submit">Créer la room</button>
         </form>
@@ -90,5 +102,41 @@
             <span class="badge">📱 QR Code</span>
         </div>
     </div>
+
+    <script>
+        const nameInput = document.getElementById('name');
+        const slugSelect = document.getElementById('slug_mode');
+        const preview = document.getElementById('slug-preview');
+
+        function normalize(name) {
+            let s = name.normalize('NFKD');
+            s = s.replace(/[\u0300-\u036f]/g, '');  // strip combining marks
+            s = s.toLowerCase();
+            s = s.replace(/[^a-z0-9\s-]/g, '');
+            s = s.replace(/[\s_]+/g, '-');
+            s = s.replace(/-+/g, '-');
+            s = s.replace(/^-|-$/g, '');
+            return s || 'room';
+        }
+
+        function updatePreview() {
+            const mode = slugSelect.value;
+            const raw = nameInput.value.trim() || 'Soirée 80s';
+            const n = normalize(raw);
+            let hint = '';
+            if (mode === 'name4') {
+                hint = `/party/<span>${n}-x7k2</span>`;
+            } else if (mode === 'name') {
+                hint = `/party/<span>${n}</span>`;
+            } else {
+                hint = `/party/<span>a1b2c3d4</span>`;
+            }
+            preview.innerHTML = hint ? 'Aperçu : ' + hint : '';
+        }
+
+        nameInput.addEventListener('input', updatePreview);
+        slugSelect.addEventListener('change', updatePreview);
+        updatePreview();
+    </script>
 </body>
 </html>
