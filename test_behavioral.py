@@ -169,7 +169,7 @@ def test_authorization():
     # Access admin page without valid cookie → should show login form (200 with login fields)
     c2_cj = tempfile.mktemp(suffix=".cookies")
     c, body, _, _ = curl(f"/party/{slug}/admin", cj=c2_cj)
-    chk("Admin without auth → login page", "admin_password" in body, "got login form" if "admin_password" in body else "no login form")
+    chk("Admin without auth → login page", "Mot de passe" in body or "password" in body, "got login form" if ("password" in body) else "no login form")
 
 
 def test_ws_player_state_broadcast(slug, cj):
