@@ -30,12 +30,24 @@ FAILURES_LIST = []
 
 # ── Helpers ──────────────────────────────────────────────────
 
+def _fmt(data: dict) -> str:
+    """URL-encode form data dict → key=value&key=value string."""
+    import urllib.parse
+    return "&".join(f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}"
+                    for k, v in data.items())
+
+
 def curl(path, method="GET", data=None, cj=None, follow=False, raw=False):
-    """curl → (http_code, body, cj_path, final_url)"""
+    """curl → (http_code, body, cj_path, final_url)
+    
+    If data is a dict, it's auto URL-encoded.
+    """
     cj = cj or tempfile.mktemp(suffix=".cookies")
     cmd = ["curl", "-s", "-w", "\n%{http_code}\n%{url_effective}",
            "-b", cj, "-c", cj, "--max-time", "15"]
     if data is not None:
+        if isinstance(data, dict):
+            data = _fmt(data)
         cmd += ["-d", data, "-H", "Content-Type: application/x-www-form-urlencoded"]
     elif method != "GET":
         cmd += ["-X", method]
