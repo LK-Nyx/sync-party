@@ -5,9 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin — {{ name }}</title>
     <style>
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111;
+            --surface2: #1a1a1a;
+            --text: #eee;
+            --text-dim: #aaa;
+            --text-muted: #888;
+            --border: #222;
+            --border2: #333;
+            --accent: #8338ec;
+            --pink: #ff006e;
+            --danger: #f87171;
+            --success: #4ade80;
+        }
+        :root.light {
+            --bg: #f5f5f5;
+            --surface: #ffffff;
+            --surface2: #f0f0f0;
+            --text: #1a1a1a;
+            --text-dim: #555;
+            --text-muted: #777;
+            --border: #e0e0e0;
+            --border2: #ccc;
+            --accent: #8338ec;
+            --pink: #ff006e;
+            --danger: #dc2626;
+            --success: #16a34a;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #eee; display: flex; min-height: 100vh; }
-        .sidebar { width: 360px; background: #111; border-right: 1px solid #222; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+        .sidebar { width: 360px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; overflow-y: auto; }
         .main { flex: 1; display: flex; flex-direction: column; }
         .player-wrap { flex: 1; background: #000; position: relative; min-height: 400px; }
         #player { width: 100%; height: 100%; }
@@ -16,37 +44,87 @@
         .qr-overlay img { max-width: 300px; border-radius: 12px; }
         h2 { font-size: 1.1rem; margin-bottom: 16px; }
         .section { margin-bottom: 18px; }
-        .section label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px; }
-        .section input, .section select { width: 100%; padding: 10px; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; color: #eee; font-size: 0.9rem; }
+        .section label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
+        .section input, .section select { width: 100%; padding: 10px; border: 1px solid var(--border2); border-radius: 6px; background: var(--surface2); color: var(--text); font-size: 0.9rem; }
         .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 0.9rem; cursor: pointer; margin-bottom: 6px; font-weight: 600; }
-        .btn-purple { background: #8338ec; color: white; }
-        .btn-pink { background: #ff006e; color: white; }
-        .btn-dark { background: #222; color: #ccc; border: 1px solid #333; }
+        .btn-purple { background: var(--accent); color: white; }
+        .btn-pink { background: var(--pink); color: white; }
+        .btn-dark { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border2); }
         .btn-small { padding: 6px 10px; font-size: 0.75rem; width: auto; }
         .player-ctrls { display: flex; gap: 4px; }
         .player-ctrls button { flex: 1; }
-        .mode-btns { display: flex; gap: 4px; }
-        .mode-btns button { flex: 1; padding: 8px; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; color: #aaa; cursor: pointer; font-size: 0.75rem; }
-        .mode-btns button.active { background: #8338ec; color: white; border-color: #8338ec; }
-        .viewer-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: #1a1a1a; border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem; }
+
+        /* Mode pill dropdown */
+        .mode-pill-wrapper { position: relative; }
+        .mode-pill-btn {
+            width: 100%; padding: 10px 14px; border: 1px solid var(--border2); border-radius: 20px;
+            background: var(--surface2); color: var(--text); cursor: pointer; font-size: 0.85rem; font-weight: 600;
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            transition: border-color 0.2s;
+        }
+        .mode-pill-btn:hover { border-color: var(--accent); }
+        .mode-pill-btn .arrow { font-size: 0.6rem; transition: transform 0.2s; }
+        .mode-pill-btn.open .arrow { transform: rotate(180deg); }
+        .mode-dropdown {
+            position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
+            background: var(--surface); border: 1px solid var(--border2); border-radius: 12px;
+            overflow: hidden; display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+        .mode-dropdown.open { display: block; }
+        .mode-dropdown button {
+            width: 100%; padding: 10px 14px; border: none; background: transparent; color: var(--text);
+            cursor: pointer; font-size: 0.85rem; text-align: left; display: flex; align-items: center; gap: 8px;
+        }
+        .mode-dropdown button:hover { background: var(--surface2); }
+        .mode-dropdown button.active { background: var(--accent); color: white; }
+
+        .viewer-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: var(--surface2); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem; }
         .viewer-name { flex: 1; }
         .viewer-badges { display: flex; gap: 4px; margin: 0 8px; }
         .badge { padding: 2px 6px; border-radius: 10px; font-size: 0.65rem; font-weight: 600; }
-        .badge-dj { background: #ff006e; color: white; }
+        .badge-dj { background: var(--pink); color: white; }
         .badge-muted { background: #444; color: #999; }
         .badge-mode { background: #222; color: #aaa; }
-        .badge-mod { background: #8338ec; color: white; }
+        .badge-mod { background: var(--accent); color: white; }
         .viewer-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-        .status { color: #4ade80; font-size: 0.8rem; margin-top: auto; }
-        .status.disconnected { color: #f87171; }
+        .status { color: var(--success); font-size: 0.8rem; margin-top: auto; }
+        .status.disconnected { color: var(--danger); }
         .source-btns { display: flex; gap: 4px; }
-        .source-btns button { flex: 1; padding: 8px; border: 1px solid #333; border-radius: 6px; background: #1a1a1a; color: #aaa; cursor: pointer; font-size: 0.75rem; }
-        .source-btns button.active { background: #ff006e; color: white; border-color: #ff006e; }
+        .source-btns button { flex: 1; padding: 8px; border: 1px solid var(--border2); border-radius: 6px; background: var(--surface2); color: var(--text-dim); cursor: pointer; font-size: 0.75rem; }
+        .source-btns button.active { background: var(--pink); color: white; border-color: var(--pink); }
+
+        /* Top bar items */
+        .sidebar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .sidebar-header h2 { margin-bottom: 0; }
+        .header-actions { display: flex; gap: 6px; }
+        .icon-btn {
+            width: 34px; height: 34px; border: 1px solid var(--border2); border-radius: 50%;
+            background: var(--surface2); color: var(--text); cursor: pointer; font-size: 1rem;
+            display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+        }
+        .icon-btn:hover { border-color: var(--accent); background: var(--accent); color: white; }
+        .icon-btn.copied { background: var(--success); border-color: var(--success); color: white; }
+
+        /* QR section with copy */
+        .qr-section { display: flex; gap: 6px; }
+        .qr-section .btn { flex: 1; }
+        .copy-link-btn {
+            padding: 10px; border: 1px solid var(--border2); border-radius: 6px;
+            background: var(--surface2); color: var(--text-dim); cursor: pointer; font-size: 0.9rem;
+            font-weight: 600; transition: all 0.2s; white-space: nowrap;
+        }
+        .copy-link-btn:hover { border-color: var(--accent); color: var(--text); }
+        .copy-link-btn.copied { background: var(--success); border-color: var(--success); color: white; }
     </style>
 </head>
 <body>
     <div class="sidebar">
-        <h2>🎛️ Admin — {{ name }}</h2>
+        <div class="sidebar-header">
+            <h2>🎛️ Admin — {{ name }}</h2>
+            <div class="header-actions">
+                <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Thème">🌙</button>
+            </div>
+        </div>
 
         <div class="section">
             <label>Source</label>
@@ -74,17 +152,27 @@
 
         <div class="section">
             <label>Mode global</label>
-            <div class="mode-btns" id="mode-btns">
-                <button data-mode="resume" class="active" onclick="setGlobalMode('resume')">📋</button>
-                <button data-mode="video" onclick="setGlobalMode('video')">🎬</button>
-                <button data-mode="audio" onclick="setGlobalMode('audio')">🎵</button>
-                <button data-mode="karaoke" onclick="setGlobalMode('karaoke')">🎤</button>
+            <div class="mode-pill-wrapper" id="mode-pill-wrapper">
+                <button class="mode-pill-btn" onclick="toggleModeDropdown()" id="mode-pill-btn">
+                    <span id="mode-pill-label">📋 Résumé</span>
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="mode-dropdown" id="mode-dropdown">
+                    <button data-mode="resume" class="active" onclick="setGlobalMode('resume')">📋 Résumé</button>
+                    <button data-mode="video" onclick="setGlobalMode('video')">🎬 Vidéo</button>
+                    <button data-mode="audio" onclick="setGlobalMode('audio')">🎵 Audio</button>
+                    <button data-mode="karaoke" onclick="setGlobalMode('karaoke')">🎤 Karaoké</button>
+                </div>
             </div>
         </div>
 
         <div class="section">
-            <button class="btn btn-purple" onclick="showQR()">📱 Afficher QR</button>
-            <button class="btn btn-dark" onclick="hideQR()">❌ Cacher QR</button>
+            <label>QR & Lien</label>
+            <div class="qr-section">
+                <button class="btn btn-purple" onclick="showQR()">📱 QR</button>
+                <button class="btn btn-dark" onclick="hideQR()">❌ Cacher</button>
+                <button class="copy-link-btn" id="copy-link-btn" onclick="copyLink()">🔗 Copier</button>
+            </div>
         </div>
 
         <div class="section">
@@ -117,6 +205,49 @@
         let currentVideoId = '';
         let playerReady = false;
         let lastBroadcastTime = 0;
+
+        // ── Theme ──────────────────────────────────────────
+        function toggleTheme() {
+            const root = document.documentElement;
+            const isLight = root.classList.toggle('light');
+            const btn = document.querySelector('.theme-toggle');
+            btn.textContent = isLight ? '☀️' : '🌙';
+            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        }
+        (function initTheme() {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'light') {
+                document.documentElement.classList.add('light');
+                document.querySelector('.theme-toggle').textContent = '☀️';
+            }
+        })();
+
+        // ── Copy link ──────────────────────────────────────
+        function copyLink() {
+            const url = window.location.origin + '/party/' + SLUG;
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = document.getElementById('copy-link-btn');
+                const orig = btn.textContent;
+                btn.textContent = '✅ Copié!';
+                btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+            });
+        }
+
+        // ── Mode dropdown ───────────────────────────────────
+        function toggleModeDropdown() {
+            const dd = document.getElementById('mode-dropdown');
+            const btn = document.getElementById('mode-pill-btn');
+            dd.classList.toggle('open');
+            btn.classList.toggle('open');
+        }
+        document.addEventListener('click', (e) => {
+            const wrapper = document.getElementById('mode-pill-wrapper');
+            if (!wrapper.contains(e.target)) {
+                document.getElementById('mode-dropdown').classList.remove('open');
+                document.getElementById('mode-pill-btn').classList.remove('open');
+            }
+        });
 
         // ── YouTube API ──────────────────────────────────────
         function onYouTubeIframeAPIReady() {
@@ -195,9 +326,16 @@
             send({ type: 'set_playlist', url: url, video_id: '' });
         }
 
+        const MODE_LABELS = { resume: '📋 Résumé', video: '🎬 Vidéo', audio: '🎵 Audio', karaoke: '🎤 Karaoké' };
+
         function setGlobalMode(mode) {
-            document.querySelectorAll('#mode-btns button').forEach(b => b.classList.remove('active'));
-            document.querySelector('#mode-btns button[data-mode="' + mode + '"]').classList.add('active');
+            document.querySelectorAll('#mode-dropdown button').forEach(b => b.classList.remove('active'));
+            const activeBtn = document.querySelector('#mode-dropdown button[data-mode="' + mode + '"]');
+            if (activeBtn) activeBtn.classList.add('active');
+            document.getElementById('mode-pill-label').textContent = MODE_LABELS[mode] || mode;
+            // Close dropdown
+            document.getElementById('mode-dropdown').classList.remove('open');
+            document.getElementById('mode-pill-btn').classList.remove('open');
             send({ type: 'set_mode', mode });
         }
 
