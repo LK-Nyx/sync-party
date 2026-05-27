@@ -4,3 +4,8 @@ __pycache__/
 *.pickle
 client_secret*.json
 token.pickle
+
+# Local-only — Hermes context, mission notes, deploy scripts with tokens
+.hermes/
+MISSION_AUDIO_SYNC.txt
+deploy.py

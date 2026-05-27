@@ -244,9 +244,10 @@
 
     <script src="https://www.youtube.com/iframe_api"></script>
     <script>
-        // Jinja2 variables
+        // Jinja2 variables — these MUST stay outside {% raw %} so Jinja processes them.
         const SLUG = "{{ slug }}";
         const AUTH_TOKEN = "{{ auth_token }}";
+        const PLAYLIST_URL = "{{ playlist_url }}";
     </script>
     <script>
     {% raw %}
@@ -293,7 +294,7 @@
 
         // ── Share cards ──────────────────────────────────────
         const ROOM_URL = window.location.origin + '/party/' + SLUG;
-        let playlistUrl = '{{ playlist_url }}';
+        let playlistUrl = PLAYLIST_URL;
 
         function setCardUrls() {
             document.getElementById('room-url').textContent = ROOM_URL;
