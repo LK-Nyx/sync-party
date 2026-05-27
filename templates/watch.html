@@ -74,9 +74,14 @@
         #view-video { background: #000; }
         #view-video #player { width: 100%; height: 100%; }
         #view-audio { background: var(--bg); align-items: center; justify-content: center; flex-direction: column; }
-        .audio-viz { width: 200px; height: 200px; border-radius: 50%; background: linear-gradient(135deg, #ff006e, #8338ec); animation: pulse 2s ease-in-out infinite; margin-bottom: 20px; }
+        .audio-viz { width: 200px; height: 200px; border-radius: 50%; background: linear-gradient(135deg, #ff006e, #8338ec); animation: pulse 2s ease-in-out infinite; animation-play-state: paused; margin-bottom: 20px; }
+        .audio-viz.playing { animation-play-state: running; }
         @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } }
         .audio-title { font-size: 1.2rem; text-align: center; max-width: 300px; }
+        .audio-unlock { margin-top: 16px; padding: 12px 28px; border: none; border-radius: 24px; background: linear-gradient(135deg, #ff006e, #8338ec); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.15s, opacity 0.2s; }
+        .audio-unlock:hover { transform: scale(1.05); }
+        .audio-unlock:active { transform: scale(0.97); }
+        .audio-unlock.hidden { display: none; }
         #view-resume { background: var(--bg); flex-direction: column; padding: 20px; overflow-y: auto; }
         .resume-section { margin-bottom: 20px; padding: 16px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); }
         .resume-section h3 { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; }
@@ -114,6 +119,9 @@
     </div>
 
     <div class="content">
+        <!-- Hidden audio player container — always present in DOM, never display:none -->
+        <div id="audio-player-container" style="position:absolute;width:1px;height:1px;overflow:hidden;pointer-events:none;opacity:0;" aria-hidden="true"></div>
+
         <div class="view active" id="view-resume">
             <div class="resume-section resume-now">
                 <h3>📋 EN COURS</h3>
@@ -132,8 +140,9 @@
             <div id="player"></div>
         </div>
         <div class="view" id="view-audio">
-            <div class="audio-viz"></div>
+            <div class="audio-viz" id="audio-viz-ball"></div>
             <p class="audio-title" id="audio-title">En attente...</p>
+            <button class="audio-unlock hidden" id="audio-unlock-btn" onclick="unlockAudio()">▶ Écouter</button>
         </div>
         <div class="view" id="view-karaoke">
             <iframe id="karaoke-frame" src="" allow="autoplay"></iframe>
@@ -155,9 +164,11 @@
         let currentMode = 'resume';
         let forcedMode = null;
         let player = null;
+        let audioPlayer = null;  // hidden player for audio mode
         let currentVideoId = '';
         let syncTargetTime = 0;
         let viewerCount = 0;
+        let lastSyncTime = 0;
 
         // ── Theme ──────────────────────────────────────────
         function toggleTheme() {
@@ -249,8 +260,16 @@
                         viewerCount = msg.viewer_count;
                         updateCount();
                     }
-                    if (currentMode === 'video') syncPlayer(msg);
+                    // Sync audio+video modes — resume mode just updates the title
+                    if (currentMode === 'video' || currentMode === 'audio') {
+                        syncPlayer(msg);
+                    }
                     if (currentMode === 'karaoke') syncKaraoke(msg);
+                    // In resume mode, still store current video for later mode switch
+                    if (currentMode === 'resume') {
+                        if (msg.video_id) currentVideoId = msg.video_id;
+                        syncTargetTime = msg.current_time || 0;
+                    }
                     break;
 
                 case 'playlist_set':
@@ -316,11 +335,48 @@
             document.getElementById('mode-pill-btn').classList.remove('open');
             currentMode = mode;
             send({ type: 'set_mode', mode });
+            // Initialize the right player for the mode
+            if (mode === 'video' && !player) initPlayer();
+            if (mode === 'audio' && !audioPlayer) initAudioPlayer();
+            // If switching to video/audio from resume, play current video
+            if ((mode === 'video' || mode === 'audio') && currentVideoId) {
+                if (mode === 'audio' && !audioUnlocked) {
+                    // Show the unlock button — can't autoplay audio without user gesture
+                    document.getElementById('audio-unlock-btn').classList.remove('hidden');
+                } else {
+                    const msg = { video_id: currentVideoId, current_time: syncTargetTime, state: 1 };
+                    syncPlayer(msg);
+                }
+            }
+            // Pause audio player when switching away from audio
+            if (mode !== 'audio' && audioPlayer && audioPlayer.pauseVideo) {
+                audioPlayer.pauseVideo();
+                setAudioVizPlaying(false);
+            }
         }
 
-        // ── Video sync ─────────────────────────────────────────
+        // ── Audio unlock ─────────────────────────────────────────
+        // Browsers block autoplay audio without user gesture.
+        // This button unlock must be called from a click handler.
+        let audioUnlocked = false;
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            audioUnlocked = true;
+            document.getElementById('audio-unlock-btn').classList.add('hidden');
+            // Init and play audio player with current video
+            if (!audioPlayer) initAudioPlayer();
+            // Give the iframe a moment to load, then play
+            setTimeout(() => {
+                if (audioPlayer && currentVideoId) {
+                    audioPlayer.loadVideoById(currentVideoId, syncTargetTime || 0);
+                    setAudioVizPlaying(true);
+                }
+            }, 500);
+        }
+
+        // ── Video + Audio players ──────────────────────────────
         function onYouTubeIframeAPIReady() {
-            // Player initialized lazily when video mode is first activated
+            // Players are initialized lazily
         }
 
         function initPlayer() {
@@ -331,18 +387,136 @@
             });
         }
 
+        function initAudioPlayer() {
+            if (audioPlayer) return;
+            // Create a div inside the always-visible container for the YT iframe
+            const container = document.getElementById('audio-player-container');
+            const playerDiv = document.createElement('div');
+            playerDiv.id = 'audio-yt-player';
+            container.appendChild(playerDiv);
+            audioPlayer = new YT.Player('audio-yt-player', {
+                height: '1', width: '1',
+                playerVars: { autoplay: 0, controls: 0 },
+                events: {
+                    onReady: () => { if (currentVideoId) audioPlayer.loadVideoById(currentVideoId, syncTargetTime || 0); },
+                    onStateChange: (e) => { /* audio player syncs via drift correction */ },
+                }
+            });
+        }
+
+        function getActivePlayer() {
+            // Which player should receive sync commands
+            if (currentMode === 'audio') return audioPlayer;
+            if (currentMode === 'video' || currentMode === 'karaoke') return player;
+            return player; // resume mode still creates video player lazily
+        }
+
         function syncPlayer(msg) {
+            // Ensure the right player exists for the current mode
+            if (currentMode === 'video') {
+                if (!player) initPlayer();
+            } else if (currentMode === 'audio') {
+                if (!audioPlayer) initAudioPlayer();
+            }
+
+            const targetTime = msg.current_time || 0;
+            syncTargetTime = targetTime;
+            lastSyncTime = Date.now();
+
+            if (msg.video_title) {
+                document.getElementById('resume-title').textContent = msg.video_title;
+                document.getElementById('audio-title').textContent = msg.video_title;
+            }
+
+            if (currentMode === 'video') {
+                syncVideoPlayer(msg);
+            } else if (currentMode === 'audio') {
+                syncAudioPlayer(msg);
+            } else if (currentMode === 'karaoke') {
+                syncKaraoke(msg);
+            }
+        }
+
+        function syncVideoPlayer(msg) {
             if (!player || !player.loadVideoById) { initPlayer(); return; }
-            if (msg.video_id && msg.video_id !== currentVideoId) {
-                player.loadVideoById(msg.video_id, msg.current_time || 0);
-                currentVideoId = msg.video_id;
+            const vid = msg.video_id;
+            if (vid && vid !== currentVideoId) {
+                player.loadVideoById(vid, msg.current_time || 0);
+                currentVideoId = vid;
+                return;
+            }
+            // Drift correction: seek if >0.5s off
+            if (msg.current_time !== undefined && player.getCurrentTime) {
+                const drift = Math.abs(player.getCurrentTime() - msg.current_time);
+                if (drift > 0.5) {
+                    player.seekTo(msg.current_time, true);
+                }
             }
             if (msg.state === 1 && player.playVideo) player.playVideo();
             if (msg.state === 2 && player.pauseVideo) player.pauseVideo();
-            if (msg.current_time && player.seekTo && Math.abs((player.getCurrentTime?.() || 0) - msg.current_time) > 2) {
-                player.seekTo(msg.current_time, true);
+        }
+
+        function syncAudioPlayer(msg) {
+            if (!audioUnlocked) {
+                // Show the unlock button if there's a video to play
+                if (msg.video_id) {
+                    document.getElementById('audio-unlock-btn').classList.remove('hidden');
+                }
+                return;
+            }
+            const vid = msg.video_id;
+            if (!audioPlayer || !audioPlayer.loadVideoById) {
+                initAudioPlayer();
+                return;
+            }
+            // New video
+            if (vid && vid !== currentVideoId) {
+                audioPlayer.loadVideoById(vid, msg.current_time || 0);
+                currentVideoId = vid;
+                // Animate the audio viz ball when playing
+                if (msg.state === 1) setAudioVizPlaying(true);
+                return;
+            }
+            // Drift correction
+            if (msg.current_time !== undefined && audioPlayer.getCurrentTime) {
+                const drift = Math.abs(audioPlayer.getCurrentTime() - msg.current_time);
+                if (drift > 0.5) {
+                    audioPlayer.seekTo(msg.current_time, true);
+                }
+            }
+            if (msg.state === 1) {
+                audioPlayer.playVideo();
+                setAudioVizPlaying(true);
+            }
+            if (msg.state === 2) {
+                audioPlayer.pauseVideo();
+                setAudioVizPlaying(false);
             }
         }
+
+        function setAudioVizPlaying(playing) {
+            const ball = document.getElementById('audio-viz-ball');
+            if (ball) {
+                if (playing) {
+                    ball.classList.add('playing');
+                } else {
+                    ball.classList.remove('playing');
+                }
+            }
+        }
+
+        // Drift correction: periodically check and correct active player
+        setInterval(() => {
+            if (!syncTargetTime || (Date.now() - lastSyncTime > 10000)) return; // skip if no recent sync
+            const p = getActivePlayer();
+            if (!p || !p.getCurrentTime) return;
+            if (currentMode === 'resume' || currentMode === 'karaoke') return;
+            const drift = Math.abs(p.getCurrentTime() - syncTargetTime);
+            if (drift > 1.0) {
+                console.log(`[drift] correcting ${drift.toFixed(2)}s — seeking to ${syncTargetTime.toFixed(2)}`);
+                p.seekTo(syncTargetTime, true);
+            }
+        }, 5000);
 
         // ── Karaoke sync ───────────────────────────────────────
         function syncKaraoke(msg) {

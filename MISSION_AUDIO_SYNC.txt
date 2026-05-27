@@ -1,0 +1,71 @@
+## Mission : Synchronisation audio temps réel dans Sync Party
+
+### Ce que je veux
+L'audio de la vidéo YouTube en cours doit être synchrone chez TOUS les participants — admin et viewers. Comme 2gether mais focalisé audio. Quand l'admin met play/pause/seek, tout le monde est au même timecode, le même son en même temps. Pas de décalage perceptible.
+
+### Contexte technique
+
+**Stack** : FastAPI + Jinja2 templates + WebSocket (server.py)
+**Repo** : LK-Nyx/sync-party
+**Live** : https://sync-party.onrender.com (Render free tier)
+**Dir local** : ~/code/sync-party/
+
+**Ce qui existe déjà** :
+- WebSocket sync admin → viewers via `player_update` et `player_state`
+- Le mode "audio" sur le viewer affiche juste une boule CSS animée + titre, AUCUN son réel (templates/watch.html, `#view-audio`)
+- Le mode "vidéo" utilise un iframe YouTube player (`YT.Player`) qui sync via `loadVideoById` + `seekTo` + `playVideo/pauseVideo`
+- L'admin a un player YouTube iframe dans sa sidebar (templates/admin.html)
+- Le serveur broadcast `room.player_state()` à tous les viewers : `{type, video_id, video_title, state, current_time, global_mode, playlist_url, provider}`
+- Le viewer reçoit `player_state` via WebSocket et appelle `syncPlayer(msg)` qui fait `loadVideoById(msg.video_id, msg.current_time)`
+
+**Le problème actuel** :
+- Le viewer en mode "audio" n'a PAS de player YouTube → aucun son
+- Le viewer en mode "vidéo" a un player mais la sync est approximative (pas de correction de drift)
+- Les timecodes ne sont pas régulièrement envoyés par l'admin (seulement onStateChange)
+- Le drift entre participants n'est jamais corrigé
+
+**Architecture WebSocket** (server.py lignes 418-586) :
+- `POST /ws/{slug}` — un seul endpoint WS pour admin + viewers
+- L'admin envoie `{type: "player_update", video_id, title, state, current_time}`
+- Le serveur stocke room.video_id, room.state, room.current_time et broadcast `player_state` à tous les viewers
+- Les viewers n'envoient que `set_mode`, `set_name`, `dj_command`
+
+**Templates concernés** :
+- `/home/lararchfr/code/sync-party/templates/admin.html` — admin sidebar + player
+- `/home/lararchfr/code/sync-party/templates/watch.html` — viewer page avec 4 modes (resume/video/audio/karaoke)
+- `/home/lararchfr/code/sync-party/server.py` — serveur principal (614 lignes)
+
+**Room model** (server.py lignes 176-209) :
+```python
+class Room:
+    video_id, video_title, state, current_time, global_mode, provider
+    admin_ws: Optional[WebSocket]
+    viewer_ws: list[dict]  # {ws, name, mode, muted, is_dj, role}
+```
+
+**Contraintes** :
+- L'iframe YouTube API (`YT.Player`) ne permet PAS d'extraire l'audio seul
+- Pas de CORS sur les streams YouTube → pas de Web Audio API directe sur l'audio brut
+- Render free tier = pas de transcoding serveur possible
+- La solution doit marcher dans le navigateur, sans backend audio
+
+**Ce qu'il faut faire** :
+1. Chaque viewer en mode "audio" doit avoir un player YouTube CACHÉ (off-screen ou 1px) qui joue le son, avec un UI audio-only par-dessus (visualiseur, contrôles, titre)
+2. Sync précise : l'admin doit envoyer le timecode régulièrement (pas juste onStateChange) — toutes les 2-3s
+3. Correction de drift : si un viewer est à +2s du timecode admin, le recaler automatiquement
+4. Les viewers en mode "vidéo" bénéficient aussi de la même sync améliorée
+5. Résultat : tous les participants entendent exactement la même chose au même moment
+
+**Pièges connus** :
+- Python 3.14 sur Render : `msg` et `name` sont des attributs réservés du `LogRecord` → jamais les utiliser dans `extra={}`
+- Rate limit : 5 rooms/min/IP, 15 login/min/IP
+- Mot de passe super-admin : `XC32m12R///SyncParty` (URL-enc les `///`)
+- Render free tier : cold start ~30s, pas de cache clear direct
+- Token Render dans ~/.hermes/render_token
+- Jinja2 : `{% raw %}` pour les template literals JS, `{{ }}` pour les vars serveur
+
+**Déploiement** :
+- `python3 deploy.py deploy` pour pousser sur Render
+- `python3 test_sync_party.py` pour les tests E2E
+- `.venv/bin/python test_ws_sync.py` pour le test WebSocket
+- Health check : `GET /health` → `{"status":"ok","rooms":N}`

@@ -275,6 +275,20 @@
             send({ type: 'player_update', video_id: vid, title: title, state: event.data, current_time: time });
         }
 
+        // ── Timecode polling ────────────────────────
+        // Broadcast current timecode every 2s even without state change
+        // This keeps all viewers in sync even during continuous playback
+        setInterval(() => {
+            if (!player || !playerReady) return;
+            if (player.getPlayerState() !== 1) return; // only when playing
+            const vid = player.getVideoData()?.video_id || '';
+            const title = player.getVideoData()?.title || '';
+            const time = player.getCurrentTime();
+            if (vid) {
+                send({ type: 'player_update', video_id: vid, title: title, state: 1, current_time: time });
+            }
+        }, 2000);
+
         // ── WebSocket ────────────────────────────────────────
         function connectWS() {
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
