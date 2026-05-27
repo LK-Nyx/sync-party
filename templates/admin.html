@@ -39,9 +39,17 @@
         .main { flex: 1; display: flex; flex-direction: column; }
         .player-wrap { flex: 1; background: #000; position: relative; min-height: 400px; }
         #player { width: 100%; height: 100%; }
-        .qr-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 10; }
-        .qr-overlay.active { display: flex; }
-        .qr-overlay img { max-width: 300px; border-radius: 12px; }
+        /* Share cards */
+        .share-cards { display: flex; flex-direction: column; gap: 8px; }
+        .share-card { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
+        .share-card-qr { width: 56px; height: 56px; border-radius: 6px; flex-shrink: 0; cursor: pointer; transition: transform 0.2s; }
+        .share-card-qr:hover { transform: scale(1.08); }
+        .share-card-body { flex: 1; min-width: 0; }
+        .share-card-title { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+        .share-card-url { font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .share-card-copy { width: 30px; height: 30px; border: 1px solid var(--border2); border-radius: 50%; background: var(--surface2); color: var(--text); cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s; }
+        .share-card-copy:hover { border-color: var(--accent); background: var(--accent); color: white; }
+        .share-card-copy.copied { background: var(--success); border-color: var(--success); color: white; }
         h2 { font-size: 1.1rem; margin-bottom: 16px; }
         .section { margin-bottom: 18px; }
         .section label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
@@ -105,16 +113,41 @@
         .icon-btn:hover { border-color: var(--accent); background: var(--accent); color: white; }
         .icon-btn.copied { background: var(--success); border-color: var(--success); color: white; }
 
-        /* QR section with copy */
-        .qr-section { display: flex; gap: 6px; }
-        .qr-section .btn { flex: 1; }
-        .copy-link-btn {
-            padding: 10px; border: 1px solid var(--border2); border-radius: 6px;
-            background: var(--surface2); color: var(--text-dim); cursor: pointer; font-size: 0.9rem;
-            font-weight: 600; transition: all 0.2s; white-space: nowrap;
+        /* ── Simple / Advanced Mode ─────────────────── */
+        .simple-only { display: none; }
+        .advanced-only { }
+        .mode-toggle-btn {
+            width: 34px; height: 34px; border: 1px solid var(--border2); border-radius: 8px;
+            background: var(--surface2); color: var(--text); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.75rem; transition: all 0.2s; flex-shrink: 0;
         }
-        .copy-link-btn:hover { border-color: var(--accent); color: var(--text); }
-        .copy-link-btn.copied { background: var(--success); border-color: var(--success); color: white; }
+        .mode-toggle-btn:hover { border-color: var(--accent); background: var(--accent); color: white; }
+
+        body.simple-mode { font-size: 1.15rem; }
+        body.simple-mode .sidebar { padding: 26px 24px; }
+        body.simple-mode .section { margin-bottom: 24px; }
+        body.simple-mode .section label { font-size: 1rem; margin-bottom: 6px; }
+        body.simple-mode .section input, body.simple-mode .section select { font-size: 1.05rem; padding: 14px; }
+        body.simple-mode .btn { padding: 14px; font-size: 1.05rem; border-radius: 10px; }
+        body.simple-mode .btn-small { padding: 10px 16px; font-size: 0.9rem; }
+        body.simple-mode .source-btns button { padding: 14px; font-size: 0.95rem; }
+        body.simple-mode h2 { font-size: 1.35rem; }
+        body.simple-mode .mode-pill-btn { padding: 14px 20px; font-size: 1rem; }
+        body.simple-mode .mode-dropdown button { padding: 14px; font-size: 1rem; }
+        body.simple-mode .icon-btn { width: 42px; height: 42px; font-size: 1.2rem; }
+        body.simple-mode .mode-toggle-btn { width: 42px; height: 42px; font-size: 0.9rem; }
+        body.simple-mode .viewer-item { padding: 10px 12px; font-size: 1rem; }
+        body.simple-mode .player-ctrls button { padding: 14px; font-size: 1.1rem; }
+        body.simple-mode .share-card { padding: 14px; }
+        body.simple-mode .share-card-url { font-size: 0.9rem; }
+        body.simple-mode .share-card-title { font-size: 0.85rem; }
+        body.simple-mode .share-card-copy { width: 38px; height: 38px; font-size: 1rem; }
+        body.simple-mode .advanced-only { display: none !important; }
+        body.simple-mode .simple-only { display: block; }
+        /* Simple mode: simplified player controls (just play/pause) */
+        body.simple-mode .player-ctrls.advanced-only { display: none !important; }
+
     </style>
 </head>
 <body>
@@ -122,6 +155,7 @@
         <div class="sidebar-header">
             <h2>🎛️ Admin — {{ name }}</h2>
             <div class="header-actions">
+                <button class="mode-toggle-btn" onclick="toggleSimpleMode()" title="Basculer mode simple / avancé" id="mode-toggle-btn">Aa</button>
                 <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Thème">🌙</button>
             </div>
         </div>
@@ -134,7 +168,7 @@
             </div>
         </div>
 
-        <div class="section">
+        <div class="section advanced-only">
             <label>Playlist YouTube</label>
             <input type="text" id="playlist-url" value="{{ playlist_url }}" placeholder="URL ou ID playlist">
             <button class="btn btn-purple" style="margin-top:6px" onclick="setPlaylist()">Charger</button>
@@ -142,7 +176,13 @@
 
         <div class="section">
             <label>Contrôles</label>
-            <div class="player-ctrls">
+            <!-- Simple mode: just Play/Pause -->
+            <div class="player-ctrls simple-only" id="simple-ctrls">
+                <button class="btn btn-dark" onclick="playerCmd('play')" style="font-size:1.2rem">▶ Lecture</button>
+                <button class="btn btn-dark" onclick="playerCmd('pause')" style="font-size:1.2rem">⏸ Pause</button>
+            </div>
+            <!-- Advanced mode: full controls -->
+            <div class="player-ctrls advanced-only" id="adv-ctrls">
                 <button class="btn btn-dark" onclick="playerCmd('pause')">⏸</button>
                 <button class="btn btn-dark" onclick="playerCmd('play')">▶</button>
                 <button class="btn btn-dark" onclick="playerCmd('next')">⏭</button>
@@ -167,15 +207,28 @@
         </div>
 
         <div class="section">
-            <label>QR & Lien</label>
-            <div class="qr-section">
-                <button class="btn btn-purple" onclick="showQR()">📱 QR</button>
-                <button class="btn btn-dark" onclick="hideQR()">❌ Cacher</button>
-                <button class="copy-link-btn" id="copy-link-btn" onclick="copyLink()">🔗 Copier</button>
+            <label>Partager</label>
+            <div class="share-cards">
+                <div class="share-card" id="share-room">
+                    <img class="share-card-qr" id="room-qr" src="/party/{{ slug }}/qr?type=room" alt="QR Room" onclick="copyCardUrl('room')">
+                    <div class="share-card-body" onclick="copyCardUrl('room')">
+                        <div class="share-card-title">🏠 Room — inviter</div>
+                        <div class="share-card-url" id="room-url"></div>
+                    </div>
+                    <button class="share-card-copy" id="room-copy-btn" onclick="copyCardUrl('room')" title="Copier le lien">📋</button>
+                </div>
+                <div class="share-card" id="share-source">
+                    <img class="share-card-qr" id="source-qr" src="/party/{{ slug }}/qr" alt="QR Source" onclick="copyCardUrl('source')">
+                    <div class="share-card-body" onclick="copyCardUrl('source')">
+                        <div class="share-card-title">🎬 Source — playlist</div>
+                        <div class="share-card-url" id="source-url"></div>
+                    </div>
+                    <button class="share-card-copy" id="source-copy-btn" onclick="copyCardUrl('source')" title="Copier le lien">📋</button>
+                </div>
             </div>
         </div>
 
-        <div class="section">
+        <div class="section advanced-only">
             <label>Viewers (<span id="vc">0</span>)</label>
             <div id="viewer-list"></div>
         </div>
@@ -186,9 +239,6 @@
     <div class="main">
         <div class="player-wrap">
             <div id="player"></div>
-            <div class="qr-overlay" id="qr-overlay">
-                <img id="qr-img" src="" alt="QR Code">
-            </div>
         </div>
     </div>
 
@@ -222,16 +272,50 @@
             }
         })();
 
-        // ── Copy link ──────────────────────────────────────
-        function copyLink() {
-            const url = window.location.origin + '/party/' + SLUG;
+        // ── Simple / Advanced Mode Toggle ──────────────────
+        function toggleSimpleMode() {
+            const isSimple = document.body.classList.toggle('simple-mode');
+            localStorage.setItem('uimode', isSimple ? 'simple' : 'advanced');
+            const btn = document.getElementById('mode-toggle-btn');
+            btn.textContent = isSimple ? '⚙️' : 'Aa';
+        }
+        (function initUIMode() {
+            const saved = localStorage.getItem('uimode');
+            // Default is simple mode
+            if (saved === 'advanced') {
+                // Stay in advanced (default) — no class added
+            } else {
+                document.body.classList.add('simple-mode');
+                const btn = document.getElementById('mode-toggle-btn');
+                if (btn) btn.textContent = '⚙️';
+            }
+        })();
+
+        // ── Share cards ──────────────────────────────────────
+        const ROOM_URL = window.location.origin + '/party/' + SLUG;
+        let playlistUrl = '{{ playlist_url }}';
+
+        function setCardUrls() {
+            document.getElementById('room-url').textContent = ROOM_URL;
+            const srcEl = document.getElementById('source-url');
+            srcEl.textContent = playlistUrl || ROOM_URL;
+        }
+        setCardUrls();
+
+        function copyCardUrl(type) {
+            const url = type === 'room' ? ROOM_URL : (playlistUrl || ROOM_URL);
+            const btnId = type + '-copy-btn';
             navigator.clipboard.writeText(url).then(() => {
-                const btn = document.getElementById('copy-link-btn');
+                const btn = document.getElementById(btnId);
                 const orig = btn.textContent;
-                btn.textContent = '✅ Copié!';
+                btn.textContent = '✓';
                 btn.classList.add('copied');
                 setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
             });
+        }
+
+        function refreshSourceQR() {
+            document.getElementById('source-qr').src = '/party/' + SLUG + '/qr?t=' + Date.now();
         }
 
         // ── Mode dropdown ───────────────────────────────────
@@ -337,6 +421,9 @@
                 player.loadPlaylist({ list: playlistId, listType: 'playlist' });
                 currentVideoId = '';
             }
+            playlistUrl = url;
+            setCardUrls();
+            refreshSourceQR();
             send({ type: 'set_playlist', url: url, video_id: '' });
         }
 
@@ -363,16 +450,6 @@
         function unmuteViewer(n) { send({ type: 'unmute_viewer', target: n }); }
         function kickViewer(n) { send({ type: 'kick_viewer', target: n }); }
         function promoteDJ(n) { send({ type: 'promote_dj', target: n }); }
-
-        function showQR() {
-            document.getElementById('qr-img').src = '/party/' + SLUG + '/qr';
-            document.getElementById('qr-overlay').classList.add('active');
-            send({ type: 'show_qr' });
-        }
-        function hideQR() {
-            document.getElementById('qr-overlay').classList.remove('active');
-            send({ type: 'hide_qr' });
-        }
 
         function onDJRequest(msg) {
             if (msg.command === 'next') player.nextVideo();

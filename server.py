@@ -316,11 +316,16 @@ async def watch_page(slug: str):
     return HTMLResponse(render("watch.html", slug=slug, name=room.name))
 
 @app.get("/party/{slug}/qr")
-async def qr_img(slug: str):
+async def qr_img(slug: str, type: str = "", request: Request = None):
     room = rooms.get(slug)
     if not room:
         raise HTTPException(404)
-    url = room.playlist_url or f"https://sync-party.onrender.com/party/{slug}"
+    base = f"https://sync-party.onrender.com/party/{slug}"
+    if type == "room":
+        url = base
+    else:
+        # Default: source (playlist URL), fallback to room URL
+        url = room.playlist_url or base
     img = qrcode.make(url)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -578,11 +583,6 @@ async def _admin_msg(room: Room, msg: dict):
             except Exception:
                 pass
         await _tell_admin(room, {"type": "viewer_list", "viewers": room.viewer_list()})
-    elif t == "show_qr":
-        url = room.playlist_url or f"https://sync-party.onrender.com/party/{room.slug}"
-        await _bcast(room, {"type": "show_qr", "url": url})
-    elif t == "hide_qr":
-        await _bcast(room, {"type": "hide_qr"})
 
 async def _viewer_msg(room: Room, msg: dict, viewer: dict):
     t = msg.get("type", "")

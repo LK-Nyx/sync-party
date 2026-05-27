@@ -193,41 +193,44 @@ def test_ws_player_update_broadcast(slug, cj):
     ws_url = URL.replace("https://", "wss://").replace("http://", "ws://")
 
     async def test():
-        async with websockets.connect(f"{ws_url}/ws/{slug}") as admin_ws:
-            # Auth as admin
-            await admin_ws.send(json.dumps({"role": "admin", "token": admin_token}))
-            auth = json.loads(await admin_ws.recv())
-            chk("Admin auth", auth.get("type") == "auth_ok", str(auth))
+        # Connect viewer FIRST so it's in the room to receive broadcasts
+        async with websockets.connect(f"{ws_url}/ws/{slug}") as viewer_ws:
+            await viewer_ws.send(json.dumps({"role": "viewer"}))
+            init = json.loads(await viewer_ws.recv())
+            chk("Viewer init type", init.get("type") == "player_state", init.get("type", "?"))
 
-            # Send player_update with timecode
-            await admin_ws.send(json.dumps({
-                "type": "player_update",
-                "video_id": "dQw4w9WgXcQ",
-                "title": "Never Gonna Give You Up",
-                "state": 1,
-                "current_time": 42.5,
-            }))
+            # Now connect admin
+            async with websockets.connect(f"{ws_url}/ws/{slug}") as admin_ws:
+                await admin_ws.send(json.dumps({"role": "admin", "token": admin_token}))
+                auth = json.loads(await admin_ws.recv())
+                chk("Admin auth", auth.get("type") == "auth_ok", str(auth))
 
-            # Connect viewer and check state
-            async with websockets.connect(f"{ws_url}/ws/{slug}") as viewer_ws:
-                await viewer_ws.send(json.dumps({"role": "viewer"}))
-                init = json.loads(await viewer_ws.recv())
-                chk("Viewer init type", init.get("type") == "player_state", init.get("type", "?"))
+                # Send player_update — viewer should receive the broadcast
+                await admin_ws.send(json.dumps({
+                    "type": "player_update",
+                    "video_id": "dQw4w9WgXcQ",
+                    "title": "Never Gonna Give You Up",
+                    "state": 1,
+                    "current_time": 42.5,
+                }))
 
-                # Wait for broadcast from admin's update
-                try:
-                    msg = json.loads(await asyncio.wait_for(viewer_ws.recv(), timeout=3))
-                    if msg.get("type") == "player_state":
+                # Receive viewer messages until we get a player_state with content
+                deadline = time.time() + 5
+                found = False
+                while time.time() < deadline:
+                    try:
+                        msg = json.loads(await asyncio.wait_for(viewer_ws.recv(), timeout=2))
+                    except asyncio.TimeoutError:
+                        break
+                    if msg.get("type") == "player_state" and msg.get("video_title"):
                         chk("timecode in broadcast", msg.get("current_time") is not None, str(msg.get("current_time")))
                         chk("video_id in broadcast", msg.get("video_id") == "dQw4w9WgXcQ", msg.get("video_id", "?"))
                         chk("state in broadcast", msg.get("state") == 1, str(msg.get("state")))
                         chk("title in broadcast", msg.get("video_title") == "Never Gonna Give You Up", msg.get("video_title", "?"))
-                    elif msg.get("type") == "viewer_joined":
-                        # Skip join notification, wait for next
-                        msg2 = json.loads(await asyncio.wait_for(viewer_ws.recv(), timeout=3))
-                        chk("timecode after join", msg2.get("current_time") is not None, str(msg2.get("current_time")))
-                except asyncio.TimeoutError:
-                    chk("Received broadcast", False, "timeout waiting for player_state")
+                        found = True
+                        break
+                if not found:
+                    chk("Received broadcast", False, "no player_state with content received")
 
     asyncio.run(test())
 

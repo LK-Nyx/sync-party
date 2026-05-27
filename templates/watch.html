@@ -88,17 +88,62 @@
         .resume-now p { font-size: 1.1rem; word-break: break-word; }
         #view-karaoke { background: #000; }
         #view-karaoke iframe { width: 100%; height: 100%; border: none; }
-        .qr-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.92); display: none; align-items: center; justify-content: center; z-index: 100; flex-direction: column; }
-        .qr-overlay.active { display: flex; }
-        .qr-overlay img { max-width: 280px; border-radius: 12px; margin-bottom: 16px; }
-        .qr-overlay .qr-link { font-size: 0.8rem; color: #888; max-width: 280px; word-break: break-all; text-align: center; }
+
+        /* Share card in resume view */
+        .share-card { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-top: 6px; }
+        .share-card-qr { width: 48px; height: 48px; border-radius: 6px; flex-shrink: 0; cursor: pointer; transition: transform 0.2s; }
+        .share-card-qr:hover { transform: scale(1.08); }
+        .share-card-body { flex: 1; min-width: 0; }
+        .share-card-title { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+        .share-card-url { font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .share-card-copy { width: 28px; height: 28px; border: 1px solid var(--border2); border-radius: 50%; background: var(--surface2); color: var(--text); cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s; }
+        .share-card-copy:hover { border-color: var(--accent); background: var(--accent); color: white; }
+        .share-card-copy.copied { background: #4ade80; border-color: #4ade80; color: white; }
+
+
+
+        /* ── Simple / Advanced Mode ─────────────────── */
+        .simple-only { display: none; }
+        .advanced-only { }
+        .mode-toggle-btn {
+            width: 34px; height: 34px; border: 1px solid var(--border2); border-radius: 8px;
+            background: var(--surface2); color: var(--text); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.75rem; transition: all 0.2s; flex-shrink: 0;
+        }
+        .mode-toggle-btn:hover { border-color: var(--accent); background: var(--accent); color: white; }
+
+        body.simple-mode { font-size: 1.15rem; }
+        body.simple-mode .topbar { padding: 14px 20px; }
+        body.simple-mode .topbar-left h2 { font-size: 1.25rem; }
+        body.simple-mode .icon-btn { width: 42px; height: 42px; font-size: 1.2rem; }
+        body.simple-mode .mode-toggle-btn { width: 42px; height: 42px; font-size: 0.9rem; }
+        body.simple-mode .mode-pill-btn { padding: 12px 18px; font-size: 0.95rem; }
+        body.simple-mode .mode-dropdown button { padding: 14px; font-size: 1rem; }
+        body.simple-mode .resume-section { padding: 20px; }
+        body.simple-mode .resume-section h3 { font-size: 1rem; }
+        body.simple-mode .resume-now p { font-size: 1.3rem; }
+        body.simple-mode .audio-title { font-size: 1.4rem; }
+        body.simple-mode .audio-unlock { padding: 16px 32px; font-size: 1.15rem; }
+        body.simple-mode .audio-viz { width: 240px; height: 240px; }
+        body.simple-mode .advanced-only { display: none !important; }
+        body.simple-mode .simple-only { display: block; }
+        /* Big share button for simple mode */
+        .simple-share-btn {
+            display: none; width: 100%; padding: 16px; border: none; border-radius: 12px;
+            background: linear-gradient(135deg, #ff006e, #8338ec); color: white;
+            font-size: 1.15rem; font-weight: 700; cursor: pointer; margin-top: 12px;
+            transition: transform 0.15s, opacity 0.2s;
+        }
+        .simple-share-btn:hover { transform: scale(1.03); opacity: 0.95; }
+        .simple-share-btn:active { transform: scale(0.97); }
+        body.simple-mode .simple-share-btn { display: block; }
     </style>
 </head>
 <body>
     <div class="topbar">
         <div class="topbar-left">
             <h2>🎬 {{ name }}</h2>
-            <button class="icon-btn" id="copy-link-btn" onclick="copyLink()" title="Copier le lien">🔗</button>
         </div>
         <div class="topbar-right">
             <div class="mode-pill-wrapper" id="mode-pill-wrapper">
@@ -113,8 +158,9 @@
                     <button data-mode="karaoke" onclick="switchMode('karaoke')">🎤 Karaoké</button>
                 </div>
             </div>
-            <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Thème">🌙</button>
-            <span id="vc" style="font-size:0.8rem;color:var(--text-muted)">0 👥</span>
+            <button class="mode-toggle-btn" onclick="toggleSimpleMode()" title="Basculer mode simple / avancé" id="mode-toggle-btn">Aa</button>
+            <button class="icon-btn theme-toggle advanced-only" onclick="toggleTheme()" title="Thème">🌙</button>
+            <span id="vc" class="advanced-only" style="font-size:0.8rem;color:var(--text-muted)">0 👥</span>
         </div>
     </div>
 
@@ -129,12 +175,33 @@
             </div>
             <div class="resume-section">
                 <h3>🔗 PLAYLIST</h3>
-                <a id="resume-link" href="#" target="_blank" style="color:var(--accent)">Ouvrir sur YouTube</a>
+                <a id="resume-link" href="#" target="_blank" style="display:none"></a>
+                <div class="share-card">
+                    <img class="share-card-qr" id="v-source-qr" src="/party/{{ slug }}/qr" alt="QR Source" onclick="copyCardUrl('source')">
+                    <div class="share-card-body" onclick="copyCardUrl('source')">
+                        <div class="share-card-title">🎬 Source — playlist</div>
+                        <div class="share-card-url" id="v-source-url"></div>
+                    </div>
+                    <button class="share-card-copy" id="v-source-copy-btn" onclick="copyCardUrl('source')" title="Copier le lien">📋</button>
+                </div>
             </div>
             <div class="resume-section">
+                <h3>🏠 INVITER</h3>
+                <div class="share-card">
+                    <img class="share-card-qr" id="v-room-qr" src="/party/{{ slug }}/qr?type=room" alt="QR Room" onclick="copyCardUrl('room')">
+                    <div class="share-card-body" onclick="copyCardUrl('room')">
+                        <div class="share-card-title">🏠 Room — inviter</div>
+                        <div class="share-card-url" id="v-room-url"></div>
+                    </div>
+                    <button class="share-card-copy" id="v-room-copy-btn" onclick="copyCardUrl('room')" title="Copier le lien">📋</button>
+                </div>
+            </div>
+            <div class="resume-section advanced-only">
                 <h3>👥 CONNECTÉS</h3>
                 <span id="resume-count">0</span> viewers
             </div>
+            <!-- Simple mode: big share button -->
+            <button class="simple-share-btn" onclick="showSimpleShare()">🔗 Partager la soirée</button>
         </div>
         <div class="view" id="view-video">
             <div id="player"></div>
@@ -143,16 +210,15 @@
             <div class="audio-viz" id="audio-viz-ball"></div>
             <p class="audio-title" id="audio-title">En attente...</p>
             <button class="audio-unlock hidden" id="audio-unlock-btn" onclick="unlockAudio()">▶ Écouter</button>
+            <!-- Simple mode: big share button -->
+            <button class="simple-share-btn" onclick="showSimpleShare()">🔗 Partager la soirée</button>
         </div>
         <div class="view" id="view-karaoke">
             <iframe id="karaoke-frame" src="" allow="autoplay"></iframe>
         </div>
     </div>
 
-    <div class="qr-overlay" id="qr-overlay">
-        <img id="qr-img" src="" alt="QR Code">
-        <p class="qr-link" id="qr-link"></p>
-    </div>
+
 
     <script>
         // Jinja2 variables
@@ -169,6 +235,30 @@
         let syncTargetTime = 0;
         let viewerCount = 0;
         let lastSyncTime = 0;
+        let playlistUrl = '';
+
+        // ── Share cards ──────────────────────────────────────
+        const ROOM_URL = window.location.origin + '/party/' + SLUG;
+
+        function setCardUrls() {
+            const roomUrlEl = document.getElementById('v-room-url');
+            const srcUrlEl = document.getElementById('v-source-url');
+            if (roomUrlEl) roomUrlEl.textContent = ROOM_URL;
+            if (srcUrlEl) srcUrlEl.textContent = playlistUrl || ROOM_URL;
+        }
+
+        function copyCardUrl(type) {
+            const url = type === 'room' ? ROOM_URL : (playlistUrl || ROOM_URL);
+            const btnId = 'v-' + type + '-copy-btn';
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = document.getElementById(btnId);
+                if (!btn) return;
+                const orig = btn.textContent;
+                btn.textContent = '✓';
+                btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+            });
+        }
 
         // ── Theme ──────────────────────────────────────────
         function toggleTheme() {
@@ -186,15 +276,49 @@
             }
         })();
 
+        // ── Simple / Advanced Mode Toggle ──────────────────
+        function toggleSimpleMode() {
+            const isSimple = document.body.classList.toggle('simple-mode');
+            localStorage.setItem('uimode', isSimple ? 'simple' : 'advanced');
+            const btn = document.getElementById('mode-toggle-btn');
+            btn.textContent = isSimple ? '⚙️' : 'Aa';
+        }
+        (function initUIMode() {
+            const saved = localStorage.getItem('uimode');
+            // Default is simple mode
+            if (saved === 'advanced') {
+                // Stay in advanced (default) — no class added
+            } else {
+                document.body.classList.add('simple-mode');
+                const btn = document.getElementById('mode-toggle-btn');
+                if (btn) btn.textContent = '⚙️';
+            }
+        })();
+
+        // ── Simple share button ────────────────────────────
+        function showSimpleShare() {
+            const url = window.location.origin + '/party/' + SLUG;
+            navigator.clipboard.writeText(url).then(() => {
+                const btns = document.querySelectorAll('.simple-share-btn');
+                btns.forEach(btn => {
+                    const orig = btn.textContent;
+                    btn.textContent = '✅ Lien copié !';
+                    setTimeout(() => { btn.textContent = orig; }, 1500);
+                });
+            });
+        }
+
         // ── Copy link ──────────────────────────────────────
         function copyLink() {
             const url = window.location.origin + '/party/' + SLUG;
             navigator.clipboard.writeText(url).then(() => {
                 const btn = document.getElementById('copy-link-btn');
-                const orig = btn.textContent;
-                btn.textContent = '✓';
-                btn.classList.add('copied');
-                setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+                if (btn) {
+                    const orig = btn.textContent;
+                    btn.textContent = '✓';
+                    btn.classList.add('copied');
+                    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+                }
             });
         }
 
@@ -223,6 +347,8 @@
                 document.getElementById('resume-title').textContent = state.video_title || 'En attente...';
                 if (state.playlist_url) {
                     document.getElementById('resume-link').href = state.playlist_url;
+                    playlistUrl = state.playlist_url;
+                    setCardUrls();
                 }
                 if (state.global_mode) {
                     forcedMode = state.global_mode;
@@ -255,6 +381,10 @@
                     }
                     if (msg.playlist_url) {
                         document.getElementById('resume-link').href = msg.playlist_url;
+                        if (playlistUrl !== msg.playlist_url) {
+                            playlistUrl = msg.playlist_url;
+                            setCardUrls();
+                        }
                     }
                     if (msg.viewer_count !== undefined) {
                         viewerCount = msg.viewer_count;
@@ -274,6 +404,8 @@
 
                 case 'playlist_set':
                     document.getElementById('resume-link').href = msg.url;
+                    playlistUrl = msg.url;
+                    setCardUrls();
                     break;
 
                 case 'mode_changed':
@@ -285,15 +417,7 @@
                     switchMode(msg.mode);
                     break;
 
-                case 'show_qr':
-                    document.getElementById('qr-img').src = '/party/' + SLUG + '/qr';
-                    document.getElementById('qr-link').textContent = msg.url;
-                    document.getElementById('qr-overlay').classList.add('active');
-                    break;
 
-                case 'hide_qr':
-                    document.getElementById('qr-overlay').classList.remove('active');
-                    break;
 
                 case 'viewer_joined':
                     viewerCount = msg.count;
@@ -315,8 +439,10 @@
         }
 
         function updateCount() {
-            document.getElementById('vc').textContent = viewerCount + ' 👥';
-            document.getElementById('resume-count').textContent = viewerCount;
+            const vcEl = document.getElementById('vc');
+            if (vcEl) vcEl.textContent = viewerCount + ' 👥';
+            const rcEl = document.getElementById('resume-count');
+            if (rcEl) rcEl.textContent = viewerCount;
         }
 
         // ── Modes ─────────────────────────────────────────────
@@ -529,6 +655,7 @@
         }
 
         // ── Init ───────────────────────────────────────────────
+        setCardUrls();
         loadInitialState();
         connectWS();
     {% endraw %}
