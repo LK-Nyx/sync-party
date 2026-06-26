@@ -350,21 +350,21 @@ def test_slug_modes():
     chk("name mode slug created", bool(slug), slug or "no match")
     if slug:
         chk("name is uniqueparty", slug == "uniqueparty", slug)
-        cleanup_room(slug)
+        # DON'T cleanup — keep it alive for collision test below
 
     time.sleep(1)
 
     # name4 mode (default)
-    slug, cj = _create_room_with_mode("MyParty", "name4")
-    chk("name4 slug created", bool(slug), slug or "no match")
-    if slug:
-        chk("name4 starts with 'myparty'", slug.startswith("myparty"), slug)
-        chk("name4 has suffix", "-" in slug, slug)
-        cleanup_room(slug)
+    slug2, cj2 = _create_room_with_mode("MyParty", "name4")
+    chk("name4 slug created", bool(slug2), slug2 or "no match")
+    if slug2:
+        chk("name4 starts with 'myparty'", slug2.startswith("myparty"), slug2)
+        chk("name4 has suffix", "-" in slug2, slug2)
+        cleanup_room(slug2)
 
     time.sleep(1)
 
-    # name collision → 409 — create same name again
+    # name collision → 409 — create same name again (room still exists)
     c, body, _, _ = curl("/create", "POST",
                          {"name": "UniqueParty", "admin_password": "pwd", "slug_mode": "name"}, follow=False)
     chk("name collision returns 409 or déjà pris", c == "409" or "déjà" in body.lower() or "collision" in body.lower(),

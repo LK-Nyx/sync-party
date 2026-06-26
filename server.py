@@ -56,7 +56,7 @@ logger.info(f"startup secret={'set' if SERVER_SECRET else 'unset'} "
 # ── App ────────────────────────────────────────────────────────
 app = FastAPI(title=APP_TITLE)
 app.add_middleware(RequestIDMiddleware, logger=logger)
-_jinja = Environment(loader=FileSystemLoader(TEMPLATES_DIR))
+_jinja = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=True)
 
 # ── Room store ─────────────────────────────────────────────────
 rooms: dict[str, "Room"] = {}
