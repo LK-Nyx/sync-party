@@ -18,9 +18,12 @@ def curl(path, method="GET", data=None, cj=None, follow=False):
     """curl → (http_code, body, cj_path, final_url)"""
     cj = cj or tempfile.mktemp(suffix=".cookies")
     cmd = ["curl", "-s", "-w", "\n%{http_code}\n%{url_effective}",
-           "-b", cj, "-c", cj, "--max-time", "15", "-X", method]
+           "-b", cj, "-c", cj, "--max-time", "15"]
     if data is not None:
         cmd += ["-d", data, "-H", "Content-Type: application/x-www-form-urlencoded"]
+        # Don't add -X POST — curl infers POST from -d, and -X POST breaks 303 redirect following
+    else:
+        cmd += ["-X", method]
     if follow:
         cmd += ["-L"]
     cmd.append(f"{URL}{path}")
@@ -54,8 +57,8 @@ FAILURES_LIST = []
 def test_room_state_has_timecode():
     """player_state must include current_time for drift correction."""
     sec("1. Room state includes timecode")
-    c, _, cj, final = curl("/create", "POST", "name=AudioTest&admin_password=audpwd", follow=True)
-    m = re.search(r"/party/([a-f0-9]+)/admin", final)
+    c, _, cj, final = curl("/create", "POST", {"name": "AudioTest", "admin_password": "audpwd"}, follow=True)
+    m = re.search(r"/party/([a-z0-9-]+)/admin", final)
     slug = m.group(1) if m else None
     chk("Room created", bool(slug), slug or "no slug")
 
