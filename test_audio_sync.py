@@ -9,10 +9,17 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 URL = os.environ.get("SYNC_PARTY_URL", "https://sync-party.onrender.com")
 
 # ── Helpers ──────────────────────────────────────────────────
+
+def _fmt(data: dict) -> str:
+    """URL-encode form data dict → key=value&key=value string."""
+    return "&".join(f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}"
+                    for k, v in data.items())
+
 
 def curl(path, method="GET", data=None, cj=None, follow=False):
     """curl → (http_code, body, cj_path, final_url)"""
@@ -20,6 +27,8 @@ def curl(path, method="GET", data=None, cj=None, follow=False):
     cmd = ["curl", "-s", "-w", "\n%{http_code}\n%{url_effective}",
            "-b", cj, "-c", cj, "--max-time", "15"]
     if data is not None:
+        if isinstance(data, dict):
+            data = _fmt(data)
         cmd += ["-d", data, "-H", "Content-Type: application/x-www-form-urlencoded"]
         # Don't add -X POST — curl infers POST from -d, and -X POST breaks 303 redirect following
     else:

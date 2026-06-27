@@ -45,6 +45,7 @@ from lib.slug import SLUG_MODES, generate_slug
 from providers.base import list_all as list_providers, get as get_provider
 import providers.youtube
 import providers.spotify
+import providers.local
 
 # ── Logger ─────────────────────────────────────────────────────
 logger = setup_logger()
@@ -313,6 +314,25 @@ async def room_state(slug: str) -> dict:
 async def providers_list() -> list[dict]:
     """List all available media providers."""
     return [p.__dict__ for p in list_providers()]
+
+
+@app.get("/api/local/stats")
+async def local_stats() -> dict:
+    """Return statistics about the local music collection."""
+    prov = get_provider("local")
+    if prov and hasattr(prov, "get_stats"):
+        return prov.get_stats()
+    return {"total_files": 0, "music_dir": "", "formats": {}}
+
+
+@app.get("/api/local/resolve")
+async def local_resolve(url: str = "") -> dict:
+    """Resolve a URL to a local file if available."""
+    prov = get_provider("local")
+    if not prov:
+        return {"provider": "local", "found": False, "reason": "no_provider"}
+    import asyncio
+    return await prov.resolve_url(url)
 
 
 @app.get("/health")
