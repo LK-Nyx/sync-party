@@ -144,10 +144,43 @@
         body.simple-mode .share-card-title { font-size: 0.85rem; }
         body.simple-mode .share-card-copy { width: 38px; height: 38px; font-size: 1rem; }
         body.simple-mode .advanced-only { display: none !important; }
-        body.simple-mode .simple-only { display: block; }
-        /* Simple mode: simplified player controls (just play/pause) */
         body.simple-mode .player-ctrls.advanced-only { display: none !important; }
+        body.simple-mode .player-ctrls.simple-only { display: flex; }
 
+        /* ── Playlist tracks ── */
+        .track-item {
+            display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+            background: var(--surface2); border-radius: 6px; margin-bottom: 4px;
+            font-size: 0.8rem; cursor: pointer; transition: background 0.15s;
+        }
+        .track-item:hover { background: var(--border2); }
+        .track-item .track-num { color: var(--text-muted); width: 20px; text-align: right; flex-shrink: 0; font-size: 0.7rem; }
+        .track-item .track-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .track-item .track-artist { color: var(--text-muted); font-size: 0.7rem; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .track-item .track-mood {
+            padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; font-weight: 600; flex-shrink: 0;
+        }
+        .track-mood.dansante { background: #ff006e22; color: #ff006e; }
+        .track-mood.chill { background: #8338ec22; color: #8338ec; }
+        .track-mood.calme { background: #4ade8022; color: #4ade80; }
+        .track-item .track-play {
+            width: 26px; height: 26px; border: none; border-radius: 50%;
+            background: var(--accent); color: white; cursor: pointer; font-size: 0.7rem;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+            transition: transform 0.15s;
+        }
+        .track-item .track-play:hover { transform: scale(1.15); }
+        .playlist-card {
+            display: flex; align-items: center; gap: 10px; padding: 12px;
+            background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+            cursor: pointer; transition: border-color 0.2s; margin-bottom: 6px;
+        }
+        .playlist-card:hover { border-color: var(--accent); }
+        .playlist-card .pl-icon { font-size: 1.5rem; flex-shrink: 0; }
+        .playlist-card .pl-info { flex: 1; min-width: 0; }
+        .playlist-card .pl-name { font-weight: 600; font-size: 0.85rem; }
+        .playlist-card .pl-desc { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .playlist-card .pl-count { font-size: 0.7rem; color: var(--text-dim); flex-shrink: 0; }
     </style>
 </head>
 <body>
@@ -173,6 +206,19 @@
             <label>Playlist YouTube</label>
             <input type="text" id="playlist-url" value="{{ playlist_url }}" placeholder="URL ou ID playlist">
             <button class="btn btn-purple" style="margin-top:6px" onclick="setPlaylist()">Charger</button>
+        </div>
+
+        <!-- ── Curated Playlists ── -->
+        <div class="section" id="playlist-section">
+            <label>Playlists clés en main</label>
+            <div id="playlist-list"></div>
+            <div id="playlist-tracks" style="display:none;margin-top:8px;">
+                <div class="playlist-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <span id="playlist-name" style="font-weight:600;font-size:0.85rem;"></span>
+                    <button class="btn btn-small btn-purple" onclick="loadFullPlaylist()" style="width:auto;margin:0;">▶ Tout lire</button>
+                </div>
+                <div id="track-list" style="max-height:300px;overflow-y:auto;"></div>
+            </div>
         </div>
 
         <div class="section">
@@ -485,6 +531,88 @@
         }
 
         function updateCount(n) { document.getElementById('vc').textContent = n; }
+
+        // ── Curated Playlists ─────────────────────────────────
+        let currentPlaylistKey = null;
+        let currentTracks = [];
+
+        function loadPlaylists() {
+            fetch('/api/playlists')
+                .then(r => r.json())
+                .then(playlists => {
+                    const container = document.getElementById('playlist-list');
+                    container.innerHTML = playlists.map(p => `
+                        <div class="playlist-card" onclick="selectPlaylist('${p.key}')">
+                            <span class="pl-icon">🌴</span>
+                            <div class="pl-info">
+                                <div class="pl-name">${p.name}</div>
+                                <div class="pl-desc">${p.description}</div>
+                            </div>
+                            <span class="pl-count">${p.track_count} titres</span>
+                        </div>
+                    `).join('');
+                });
+        }
+
+        function selectPlaylist(key) {
+            currentPlaylistKey = key;
+            fetch('/api/playlists/' + key)
+                .then(r => r.json())
+                .then(data => {
+                    currentTracks = data.tracks;
+                    document.getElementById('playlist-name').textContent = data.name;
+                    const list = document.getElementById('track-list');
+                    list.innerHTML = data.tracks.map((t, i) => `
+                        <div class="track-item" onclick="playTrack(${i})">
+                            <span class="track-num">${i + 1}</span>
+                            <span class="track-title">${t.title}</span>
+                            <span class="track-artist">${t.artist}</span>
+                            <span class="track-mood ${t.mood}">${t.mood}</span>
+                            <button class="track-play" onclick="event.stopPropagation();playTrack(${i})">▶</button>
+                        </div>
+                    `).join('');
+                    document.getElementById('playlist-tracks').style.display = 'block';
+                });
+        }
+
+        function playTrack(index) {
+            const track = currentTracks[index];
+            if (!track) return;
+            const url = track.url;
+            // Load into YouTube player
+            if (player) {
+                player.loadVideoById(track.video_id);
+                currentVideoId = track.video_id;
+            }
+            // Update playlist URL field
+            document.getElementById('playlist-url').value = url;
+            playlistUrl = url;
+            setCardUrls();
+            refreshSourceQR();
+            send({ type: 'set_playlist', url: url, video_id: track.video_id });
+            send({ type: 'player_update', video_id: track.video_id, title: track.title, state: 1, current_time: 0 });
+        }
+
+        function loadFullPlaylist() {
+            if (!currentTracks.length) return;
+            // Load the first track, the playlist will continue via YouTube's playlist feature
+            const first = currentTracks[0];
+            if (player) {
+                // Build a YouTube playlist URL from all video IDs
+                const ids = currentTracks.map(t => t.video_id).join(',');
+                player.loadPlaylist({ list: ids, listType: 'user_uploads' });
+                currentVideoId = first.video_id;
+            }
+            const url = currentTracks[0].url;
+            document.getElementById('playlist-url').value = url;
+            playlistUrl = url;
+            setCardUrls();
+            refreshSourceQR();
+            send({ type: 'set_playlist', url: url, video_id: first.video_id });
+        }
+
+        // Load playlists on connect
+        loadPlaylists();
     {% endraw %}
     </script>
 </body>

@@ -43,6 +43,7 @@ from lib.config import (
 )
 from lib.logging import setup_logger, get_log_ring, RequestIDMiddleware
 from lib.slug import SLUG_MODES, generate_slug
+from playlists import list_playlists, get_playlist
 
 from providers.base import list_all as list_providers, get as get_provider
 import providers.youtube
@@ -316,6 +317,33 @@ async def room_state(slug: str) -> dict:
 async def providers_list() -> list[dict]:
     """List all available media providers."""
     return [p.__dict__ for p in list_providers()]
+
+
+@app.get("/api/playlists")
+async def playlists_list() -> list[dict]:
+    """List all curated playlists."""
+    return list_playlists()
+
+
+@app.get("/api/playlists/{key}")
+async def playlist_detail(key: str) -> dict:
+    """Get a curated playlist with all tracks."""
+    pl = get_playlist(key)
+    if not pl:
+        raise HTTPException(404, "Playlist not found")
+    return {
+        "key": key,
+        "name": pl.name,
+        "description": pl.description,
+        "url": pl.url,
+        "playlist_id": pl.playlist_id,
+        "tracks": [
+            {"title": t.title, "video_id": t.video_id,
+             "artist": t.artist, "mood": t.mood,
+             "url": f"https://youtube.com/watch?v={t.video_id}"}
+            for t in pl.tracks
+        ],
+    }
 
 
 @app.get("/api/local/stats")
