@@ -1,20 +1,25 @@
-"""Local audio files provider for Sync Party — plays downloaded FLAC/MP3 files.
+"""Local media provider for Sync Party — plays downloaded video/audio files.
 
 Architecture
 ~~~~~~~~~~~~
-- Scans a configurable directory for audio files (FLAC, MP3, M4A, OGG, WAV).
-- Indexes them by title + artist (parsed from filename or metadata).
-- When a YouTube playlist URL is set, checks if local copies exist.
-- If found → serves the local file via a static HTTP endpoint.
-- If not found → returns empty result, letting the frontend fall back to YouTube.
+- Scans a configurable directory for video (.mp4, .webm, .mkv) and audio files.
+- Indexes by YouTube video ID (extracted from filename) AND normalized title.
+- Priority matching: video ID first (exact), then normalized title (fuzzy).
+- Serves files via HTTP Range requests for seekable video playback.
+- Supports yt-dlp download directly from the admin UI.
+
+Filename convention (yt-dlp output template):
+    %(id)s-%(title)s.%(ext)s
+    Example: dQw4w9WgXcQ-Never Gonna Give You Up.mp4
 
 Usage
 ~~~~~
-Set LOCAL_MUSIC_DIR env var to point to your music folder.
+Set LOCAL_MEDIA_DIR env var to point to your media folder.
 The provider auto-registers as "local" in the provider registry.
 """
 
 import json
+import mimetypes
 import os
 import re
 import time
@@ -24,45 +29,54 @@ from typing import Optional
 from providers.base import ProviderInfo, register
 
 # ── Config ─────────────────────────────────────────────────────
-MUSIC_DIR = os.environ.get("LOCAL_MUSIC_DIR", os.path.expanduser("~/Music"))
-CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "local_music_index.json")
+MEDIA_DIR = os.environ.get("LOCAL_MEDIA_DIR",
+                os.environ.get("LOCAL_MUSIC_DIR",
+                    os.path.expanduser("~/sync-party-media")))
+
+# Supported extensions
+VIDEO_EXTS = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
+AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".ogg", ".wav", ".opus"}
+ALL_EXTS = VIDEO_EXTS | AUDIO_EXTS
+
+# Mood mapping from ID3 genre tags
+GENRE_TO_MOOD = {
+    # Calme
+    "ambient": "calme", "classical": "calme", "lounge": "calme",
+    "chillout": "calme", "downtempo": "calme", "new age": "calme",
+    "meditation": "calme", "soundtrack": "calme", "instrumental": "calme",
+    "piano": "calme", "acoustic": "calme",
+    # Chill
+    "lofi": "chill", "lo-fi": "chill", "trip-hop": "chill",
+    "rnb": "chill", "r&b": "chill", "soul": "chill", "reggae": "chill",
+    "jazz": "chill", "blues": "chill", "funk": "chill",
+    "indie": "chill", "folk": "chill", "pop": "chill",
+    "hip-hop": "chill", "rap": "chill",
+    # Dansante
+    "house": "dansante", "techno": "dansante", "disco": "dansante",
+    "edm": "dansante", "drum and bass": "dansante", "dnb": "dansante",
+    "dubstep": "dansante", "trance": "dansante", "electronic": "dansante",
+    "electro": "dansante", "dance": "dansante", "club": "dansante",
+    "hardstyle": "dansante", "garage": "dansante", "breakbeat": "dansante",
+}
+
 
 # ── Index builder ──────────────────────────────────────────────
 
-def _build_index() -> dict[str, dict]:
-    """Scan MUSIC_DIR and build a searchable index of local audio files.
+def _extract_video_id(stem: str) -> Optional[str]:
+    """Extract YouTube video ID from filename if it follows yt-dlp convention.
 
-    Returns {normalized_title: {path, title, artist, duration, format}}
+    yt-dlp --output "%(id)s-%(title)s.%(ext)s"
+    → stem = "dQw4w9WgXcQ-Never Gonna Give You Up"
+    → returns "dQw4w9WgXcQ"
     """
-    index = {}
-    audio_exts = {".flac", ".mp3", ".m4a", ".ogg", ".wav", ".opus"}
-
-    if not os.path.isdir(MUSIC_DIR):
-        return index
-
-    for fpath in Path(MUSIC_DIR).rglob("*"):
-        if fpath.suffix.lower() not in audio_exts:
-            continue
-        stem = fpath.stem  # filename without extension
-
-        # Try to parse "Artist - Title" pattern
-        artist, title = _parse_artist_title(stem)
-        normalized = _normalize(title or stem)
-
-        index[normalized] = {
-            "path": str(fpath),
-            "title": title or stem,
-            "artist": artist or "Unknown",
-            "format": fpath.suffix[1:].lower(),
-            "size": fpath.stat().st_size,
-        }
-
-    return index
+    m = re.match(r"^([a-zA-Z0-9_-]{11})-(.+)$", stem)
+    if m:
+        return m.group(1)
+    return None
 
 
 def _parse_artist_title(stem: str) -> tuple[Optional[str], Optional[str]]:
     """Try to extract Artist - Title from filename."""
-    # Common patterns: "Artist - Title", "Artist – Title", "Artist — Title"
     m = re.match(r"^(.+?)\s*[–—-]\s*(.+)$", stem)
     if m:
         return m.group(1).strip(), m.group(2).strip()
@@ -80,22 +94,117 @@ def _normalize(s: str) -> str:
     return s.strip()
 
 
+def _guess_mood(filepath: str, title: str, artist: str) -> str:
+    """Guess mood from filename keywords or ID3 tags (if mutagen available)."""
+    # Try ID3 tags first
+    try:
+        import mutagen
+        m = mutagen.File(filepath, easy=True)
+        if m and "genre" in m:
+            genre = str(m["genre"][0]).lower().strip()
+            for key, mood in GENRE_TO_MOOD.items():
+                if key in genre:
+                    return mood
+    except (ImportError, Exception):
+        pass
+
+    # Fallback: keywords in title/artist
+    combined = f"{title} {artist}".lower()
+    calm_keywords = {"ambient", "calm", "peaceful", "lullaby", "meditation",
+                     "rain", "piano", "acoustic", "soft", "slow", "lofi"}
+    chill_keywords = {"chill", "lofi", "soul", "rnb", "jazz", "blues",
+                      "sunset", "vibes", "groove", "smooth", "mellow"}
+    dance_keywords = {"dance", "remix", "club", "techno", "house", "edm",
+                      "drop", "bass", "party", "night", "disco"}
+
+    for kw in calm_keywords:
+        if kw in combined:
+            return "calme"
+    for kw in chill_keywords:
+        if kw in combined:
+            return "chill"
+    for kw in dance_keywords:
+        if kw in combined:
+            return "dansante"
+
+    return "unknown"
+
+
+def _build_index() -> dict:
+    """Scan MEDIA_DIR and build a dual-index of local media files.
+
+    Returns:
+        by_id: {video_id: entry}  — exact YouTube ID match
+        by_title: {normalized_title: entry}  — fuzzy title match
+        all_entries: [entry, ...]  — full list for search/browse
+    """
+    by_id: dict[str, dict] = {}
+    by_title: dict[str, dict] = {}
+    all_entries: list[dict] = []
+
+    if not os.path.isdir(MEDIA_DIR):
+        return {"by_id": by_id, "by_title": by_title, "all": all_entries}
+
+    for fpath in sorted(Path(MEDIA_DIR).rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if fpath.suffix.lower() not in ALL_EXTS:
+            continue
+        if fpath.name.startswith("."):
+            continue
+
+        stem = fpath.stem
+        video_id = _extract_video_id(stem)
+        artist, title = _parse_artist_title(stem)
+        display_title = title or stem
+        display_artist = artist or "Unknown"
+        mood = _guess_mood(str(fpath), display_title, display_artist)
+        is_video = fpath.suffix.lower() in VIDEO_EXTS
+        mime_type, _ = mimetypes.guess_type(str(fpath))
+        if not mime_type:
+            mime_type = "video/mp4" if is_video else "audio/mpeg"
+
+        entry = {
+            "path": str(fpath),
+            "title": display_title,
+            "artist": display_artist,
+            "video_id": video_id or "",
+            "format": fpath.suffix[1:].lower(),
+            "size": fpath.stat().st_size,
+            "is_video": is_video,
+            "mime": mime_type,
+            "mood": mood,
+        }
+
+        all_entries.append(entry)
+
+        # Index by video ID (exact match)
+        if video_id:
+            by_id[video_id] = entry
+
+        # Index by normalized title (fuzzy match)
+        norm = _normalize(display_title)
+        if norm:
+            by_title[norm] = entry
+
+    return {"by_id": by_id, "by_title": by_title, "all": all_entries}
+
+
 # ── Provider ──────────────────────────────────────────────────
 
 class LocalProvider:
-    """Provider that serves audio files from a local directory.
+    """Provider that serves video/audio files from a local directory.
 
-    When a YouTube playlist URL is set, checks if local copies exist.
-    The frontend can switch to "local" mode to play downloaded files.
+    Priority matching:
+    1. YouTube video ID (exact, from filename)
+    2. Normalized title (fuzzy)
+    3. Fallback to YouTube stream
     """
 
     def __init__(self):
-        self._index: dict[str, dict] = {}
+        self._index: dict = {}
         self._last_scan: float = 0
-        self._scan_interval = 60  # rescans every 60s
+        self._scan_interval = 60
 
-    def _ensure_index(self) -> dict[str, dict]:
-        """Lazy-load or refresh the file index."""
+    def _ensure_index(self) -> dict:
         now = time.time()
         if now - self._last_scan > self._scan_interval:
             self._index = _build_index()
@@ -109,62 +218,91 @@ class LocalProvider:
             key="local",
             icon="💿",
             requires_auth=False,
-            description=f"Fichiers audio locaux ({MUSIC_DIR})",
+            description=f"Fichiers locaux ({MEDIA_DIR})",
         )
 
     @property
     def is_available(self) -> bool:
-        return os.path.isdir(MUSIC_DIR)
+        return os.path.isdir(MEDIA_DIR)
 
     async def resolve_url(self, url: str) -> dict:
-        """Resolve a URL to a local file if available.
-
-        Returns a dict with provider='local' and file info, or
-        provider='local' with empty result if not found locally.
-        """
-        index = self._ensure_index()
-        if not index:
+        """Resolve a URL to a local file. Checks video ID first, then title."""
+        idx = self._ensure_index()
+        if not idx["by_id"] and not idx["by_title"]:
             return {"provider": "local", "found": False, "reason": "no_index"}
 
-        # Extract video title from URL (YouTube video ID or title)
-        # For now, try to match by the last segment of the URL
-        title = _normalize(url.rsplit("/", 1)[-1].rsplit("?", 1)[0])
+        # Step 1: Extract YouTube video ID from URL
+        vid_match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
+        video_id = vid_match.group(1) if vid_match else None
 
-        # Direct match
-        if title in index:
-            entry = index[title]
+        # Step 2: Try exact video ID match
+        if video_id and video_id in idx["by_id"]:
+            entry = idx["by_id"][video_id]
             return {
                 "provider": "local",
                 "found": True,
+                "match": "video_id",
                 "path": entry["path"],
                 "title": entry["title"],
                 "artist": entry["artist"],
+                "video_id": entry["video_id"],
                 "format": entry["format"],
+                "is_video": entry["is_video"],
+                "mime": entry["mime"],
+                "mood": entry["mood"],
+                "size": entry["size"],
             }
 
-        # Fuzzy match: check if any indexed title contains the query or vice versa
-        for norm, entry in index.items():
+        # Step 3: Try normalized title match
+        title = _normalize(url.rsplit("/", 1)[-1].rsplit("?", 1)[0])
+        if title in idx["by_title"]:
+            entry = idx["by_title"][title]
+            return {
+                "provider": "local",
+                "found": True,
+                "match": "title",
+                "path": entry["path"],
+                "title": entry["title"],
+                "artist": entry["artist"],
+                "video_id": entry["video_id"],
+                "format": entry["format"],
+                "is_video": entry["is_video"],
+                "mime": entry["mime"],
+                "mood": entry["mood"],
+                "size": entry["size"],
+            }
+
+        # Step 4: Fuzzy title match
+        for norm, entry in idx["by_title"].items():
             if title in norm or norm in title:
                 return {
                     "provider": "local",
                     "found": True,
+                    "match": "fuzzy",
                     "path": entry["path"],
                     "title": entry["title"],
                     "artist": entry["artist"],
+                    "video_id": entry["video_id"],
                     "format": entry["format"],
+                    "is_video": entry["is_video"],
+                    "mime": entry["mime"],
+                    "mood": entry["mood"],
+                    "size": entry["size"],
                 }
 
-        return {"provider": "local", "found": False, "reason": "not_found"}
+        return {"provider": "local", "found": False, "reason": "not_found",
+                "video_id": video_id or "", "title": title}
 
     async def search(self, query: str, page_token: Optional[str] = None) -> list[dict]:
         """Search local files by query string."""
-        index = self._ensure_index()
-        if not index:
+        idx = self._ensure_index()
+        if not idx["all"]:
             return []
 
         q = _normalize(query)
         results = []
-        for norm, entry in index.items():
+        for entry in idx["all"]:
+            norm = _normalize(f"{entry['title']} {entry['artist']}")
             if q in norm or norm in q:
                 results.append({
                     "id": entry["path"],
@@ -172,35 +310,54 @@ class LocalProvider:
                     "channel": entry["artist"],
                     "url": f"local://{entry['path']}",
                     "format": entry["format"],
+                    "is_video": entry["is_video"],
+                    "mood": entry["mood"],
+                    "video_id": entry["video_id"],
                 })
-                if len(results) >= 10:
+                if len(results) >= 20:
                     break
         return results
 
     async def get_playlist_id_from_url(self, url: str) -> str:
-        """For local provider, the 'playlist ID' is just the directory path."""
-        return MUSIC_DIR
+        return MEDIA_DIR
 
     def player_vars(self, playlist_id: str) -> dict:
-        """Return player variables for local playback."""
+        idx = self._ensure_index()
         return {
             "provider": "local",
-            "music_dir": MUSIC_DIR,
-            "file_count": len(self._ensure_index()),
+            "media_dir": MEDIA_DIR,
+            "file_count": len(idx["all"]),
         }
 
     def get_stats(self) -> dict:
-        """Return statistics about the local music collection."""
-        index = self._ensure_index()
+        idx = self._ensure_index()
         formats: dict[str, int] = {}
-        for entry in index.values():
+        moods: dict[str, int] = {}
+        video_count = 0
+        audio_count = 0
+        for entry in idx["all"]:
             fmt = entry["format"]
             formats[fmt] = formats.get(fmt, 0) + 1
+            mood = entry["mood"]
+            moods[mood] = moods.get(mood, 0) + 1
+            if entry["is_video"]:
+                video_count += 1
+            else:
+                audio_count += 1
         return {
-            "total_files": len(index),
-            "music_dir": MUSIC_DIR,
+            "total_files": len(idx["all"]),
+            "media_dir": MEDIA_DIR,
+            "video_count": video_count,
+            "audio_count": audio_count,
             "formats": formats,
+            "moods": moods,
+            "by_id_count": len(idx["by_id"]),
         }
+
+    def get_by_mood(self, mood: str) -> list[dict]:
+        """Return all entries matching a given mood."""
+        idx = self._ensure_index()
+        return [e for e in idx["all"] if e["mood"] == mood]
 
 
 # Auto-register

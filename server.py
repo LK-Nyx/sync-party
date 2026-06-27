@@ -23,7 +23,9 @@ Architecture
 import io
 import json
 import logging
+import mimetypes
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -333,6 +335,138 @@ async def local_resolve(url: str = "") -> dict:
         return {"provider": "local", "found": False, "reason": "no_provider"}
     import asyncio
     return await prov.resolve_url(url)
+
+
+@app.get("/api/local/stream")
+async def local_stream(request: Request, path: str = "") -> Response:
+    """Stream a local file with HTTP Range support (seekable video/audio).
+
+    Security: path is validated against MEDIA_DIR to prevent traversal.
+    """
+    from providers.local import MEDIA_DIR
+
+    if not path:
+        raise HTTPException(400, "path required")
+
+    # Security: resolve to absolute and check it's inside MEDIA_DIR
+    abs_path = os.path.abspath(os.path.join(MEDIA_DIR, path.lstrip("/")))
+    media_abs = os.path.abspath(MEDIA_DIR)
+    if not abs_path.startswith(media_abs):
+        raise HTTPException(403, "Access denied")
+    if not os.path.isfile(abs_path):
+        raise HTTPException(404, "File not found")
+
+    file_size = os.path.getsize(abs_path)
+    mime, _ = mimetypes.guess_type(abs_path)
+    mime = mime or "application/octet-stream"
+
+    range_header = request.headers.get("range", "")
+    if range_header:
+        # Parse Range header: "bytes=start-end"
+        m = re.search(r"bytes=(\d+)-(\d*)", range_header)
+        if m:
+            start = int(m.group(1))
+            end = int(m.group(2)) if m.group(2) else file_size - 1
+            length = end - start + 1
+
+            with open(abs_path, "rb") as f:
+                f.seek(start)
+                data = f.read(length)
+
+            return Response(
+                content=data,
+                status_code=206,
+                media_type=mime,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(length),
+                    "Accept-Ranges": "bytes",
+                },
+            )
+
+    # No range → full file
+    with open(abs_path, "rb") as f:
+        data = f.read()
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={
+            "Content-Length": str(file_size),
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
+@app.get("/api/local/search")
+async def local_search(q: str = "") -> list[dict]:
+    """Search local files by query string."""
+    prov = get_provider("local")
+    if not prov:
+        return []
+    import asyncio
+    return await prov.search(q)
+
+
+@app.get("/api/local/mood/{mood}")
+async def local_by_mood(mood: str) -> list[dict]:
+    """Return all local files matching a given mood (calme, chill, dansante)."""
+    prov = get_provider("local")
+    if not prov or not hasattr(prov, "get_by_mood"):
+        return []
+    return prov.get_by_mood(mood)
+
+
+@app.post("/api/local/download")
+async def local_download(url: str = "") -> dict:
+    """Download a YouTube video/audio to the local media directory using yt-dlp.
+
+    Returns the resolved local file info after download completes.
+    """
+    if not url:
+        raise HTTPException(400, "url required")
+
+    from providers.local import MEDIA_DIR
+
+    # Validate it's a YouTube URL
+    if "youtube.com" not in url and "youtu.be" not in url:
+        raise HTTPException(400, "Only YouTube URLs supported")
+
+    import subprocess
+    import tempfile
+
+    # Use yt-dlp with our naming convention
+    cmd = [
+        "yt-dlp",
+        "--output", os.path.join(MEDIA_DIR, "%(id)s-%(title)s.%(ext)s"),
+        "--format", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+        "--merge-output-format", "mp4",
+        "--no-playlist",
+        "--print", "filename",
+        url,
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            return {"success": False, "error": result.stderr[:500]}
+        filepath = result.stdout.strip().split("\n")[-1].strip()
+        # Force reindex
+        prov = get_provider("local")
+        if prov:
+            prov._last_scan = 0
+            prov._ensure_index()
+        # Resolve the downloaded file
+        import asyncio
+        resolved = await prov.resolve_url(url) if prov else {}
+        return {
+            "success": True,
+            "filepath": filepath,
+            "resolved": resolved,
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Download timed out after 5 minutes"}
+    except FileNotFoundError:
+        return {"success": False, "error": "yt-dlp not installed. Install with: pip install yt-dlp"}
 
 
 @app.get("/health")
