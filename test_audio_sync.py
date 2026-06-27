@@ -273,7 +273,7 @@ def main():
 
     # Cleanup
     c, _, su_cj, _ = curl("/admin/login", "POST",
-        f"password={os.environ.get('SUPER_ADMIN_PWD', 'XC32m12R///SyncParty')}",
+        {"password": os.environ.get('SUPER_ADMIN_PWD', 'XC32m12R///SyncParty')},
         follow=True)
     if c == "303":
         curl(f"/admin/room/{slug}/delete", "POST", cj=su_cj)
